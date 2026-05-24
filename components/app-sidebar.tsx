@@ -172,9 +172,10 @@ export function AppSidebar({ repoKey }: Props) {
               Repositories
             </span>
             <Link
-              href="/"
+              href="/?connect=github"
               className="grid h-5 w-5 place-items-center rounded hover:bg-sidebar-accent"
-              aria-label="Add repository"
+              aria-label="Connect to GitHub"
+              title="Connect to GitHub"
             >
               <Plus className="h-3 w-3 text-muted-foreground" />
             </Link>

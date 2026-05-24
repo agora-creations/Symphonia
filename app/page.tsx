@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ChevronRight, FolderGit2, Plus, Search } from "lucide-react";
+import { ChevronRight, ExternalLink, FolderGit2, Github, Search } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { RepositorySummary } from "@/lib/repository-model";
+import type { GitHubConnectionState, RepositorySummary } from "@/lib/repository-model";
 import { cn } from "@/lib/utils";
 
 export default function RepositoriesPage() {
@@ -18,23 +18,34 @@ export default function RepositoriesPage() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [githubConnection, setGitHubConnection] = useState<GitHubConnectionState | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch("/api/repositories", { cache: "no-store" })
-      .then(async (res) => {
+    Promise.all([
+      fetch("/api/repositories", { cache: "no-store" }).then(async (res) => {
         const payload = (await res.json()) as {
           repositories?: RepositorySummary[];
           error?: string;
         };
         if (!res.ok) throw new Error(payload.error ?? "Could not load repositories");
         return payload.repositories ?? [];
-      })
-      .then((next) => {
+      }),
+      fetch("/api/github/connection", { cache: "no-store" }).then(async (res) => {
+        const payload = (await res.json()) as {
+          connection?: GitHubConnectionState;
+          error?: string;
+        };
+        if (!res.ok) return null;
+        return payload.connection ?? null;
+      }),
+    ])
+      .then(([next, connection]) => {
         if (!cancelled) {
           setRepositories(next);
+          setGitHubConnection(connection);
           setError(null);
         }
       })
@@ -47,6 +58,13 @@ export default function RepositoriesPage() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("connect") === "github" || params.get("github") === "installed") {
+      setConnectOpen(true);
+    }
   }, []);
 
   const filtered = useMemo(() => {
@@ -79,10 +97,10 @@ export default function RepositoriesPage() {
             />
           </div>
           <button
-            onClick={() => setAddOpen(true)}
+            onClick={() => setConnectOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground hover:opacity-90"
           >
-            <Plus className="h-3.5 w-3.5" /> Add repository
+            <Github className="h-3.5 w-3.5" /> Connect to GitHub
           </button>
         </div>
       </header>
@@ -114,16 +132,16 @@ export default function RepositoriesPage() {
         ) : filtered.length === 0 ? (
           <div className="rounded-lg border border-dashed p-8 text-center">
             <FolderGit2 className="mx-auto h-8 w-8 text-muted-foreground" />
-            <h2 className="mt-3 text-sm font-medium">No repositories added</h2>
+            <h2 className="mt-3 text-sm font-medium">No repositories connected</h2>
             <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-              Add a local Git repository by absolute path to create or open its
-              Symphonía workspace.
+              Install the Symphonía GitHub App to choose the repositories it can
+              access, then link a local Git worktree.
             </p>
             <button
-              onClick={() => setAddOpen(true)}
+              onClick={() => setConnectOpen(true)}
               className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
             >
-              <Plus className="h-4 w-4" /> Add repository
+              <Github className="h-4 w-4" /> Connect to GitHub
             </button>
           </div>
         ) : (
@@ -137,9 +155,10 @@ export default function RepositoriesPage() {
         )}
       </main>
 
-      <AddRepositoryDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
+      <ConnectRepositoryDialog
+        open={connectOpen}
+        onOpenChange={setConnectOpen}
+        githubConnection={githubConnection}
         onAdded={(repo) => setRepositories((current) => upsertRepository(current, repo))}
       />
     </div>
@@ -194,13 +213,15 @@ function Stat({ label, value, muted }: { label: string; value: string; muted?: b
   );
 }
 
-function AddRepositoryDialog({
+function ConnectRepositoryDialog({
   open,
   onOpenChange,
+  githubConnection,
   onAdded,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  githubConnection: GitHubConnectionState | null;
   onAdded: (repo: RepositorySummary) => void;
 }) {
   const [path, setPath] = useState("");
@@ -238,25 +259,68 @@ function AddRepositoryDialog({
       setName("");
       router.push(`/r/${payload.repository.key.toLowerCase()}/tasks`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add repository");
+      setError(err instanceof Error ? err.message : "Could not connect repository");
     } finally {
       setPending(false);
     }
   };
 
+  const installUrl = githubConnection?.installationUrl;
+  const appInstalled = githubConnection?.installed || (githubConnection?.installedRepositoriesCount ?? 0) > 0;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <div>
-          <DialogTitle className="text-base font-semibold">Add repository</DialogTitle>
+          <DialogTitle className="text-base font-semibold">Connect to GitHub</DialogTitle>
           <DialogDescription className="mt-1 text-sm text-muted-foreground">
-            Enter the absolute path to a local Git repository.
+            Install the Symphonía GitHub App, choose repositories on GitHub, then
+            connect the matching local worktree.
           </DialogDescription>
         </div>
 
+        <div className="rounded-md border bg-muted/25 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium">GitHub App access</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {appInstalled
+                  ? `Symphonía is installed on ${githubConnection?.installedRepositoriesCount ?? 0} repositories.`
+                  : "Choose exactly which GitHub repositories Symphonía can access."}
+              </div>
+            </div>
+            {installUrl ? (
+              <a
+                href={installUrl}
+                className="inline-flex shrink-0 items-center gap-1 rounded-md border bg-background px-2.5 py-1 text-xs hover:bg-accent"
+              >
+                {appInstalled ? "Manage access" : "Install GitHub App"}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            ) : (
+              <span className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300">
+                Install URL missing
+              </span>
+            )}
+          </div>
+          {!installUrl && (
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+              Set SYMPHONIA_GITHUB_APP_NAME or SYMPHONIA_GITHUB_INSTALL_URL on
+              the local service to enable GitHub installation.
+            </p>
+          )}
+        </div>
+
         <form onSubmit={submit} className="space-y-3">
+          <div>
+            <div className="text-sm font-medium">Use existing local repository</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Browser folder picking is not available here yet, so local worktrees
+              are connected by absolute path.
+            </p>
+          </div>
           <label className="block text-xs font-medium">
-            Repository path
+            Local repository path
             <input
               autoFocus
               value={path}
@@ -304,7 +368,7 @@ function AddRepositoryDialog({
               disabled={!path.trim() || pending}
               className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {pending ? "Adding..." : "Add repository"}
+              {pending ? "Connecting..." : "Connect local repository"}
             </button>
           </div>
         </form>
