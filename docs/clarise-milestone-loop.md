@@ -37,6 +37,7 @@ Spec artifact statuses:
 - `plan_ready`
 - `ready_for_approval`
 - `approved`
+- `created`
 - `archived`
 
 Task statuses remain unchanged:
@@ -50,6 +51,6 @@ Task statuses remain unchanged:
 
 ## Approved Plans
 
-An approved milestone means the milestone has enough discussion, requirements, and plan context to move forward. It does not create tasks yet, and it does not start Coding Assistant work.
+An approved milestone means the milestone has enough discussion, requirements, and plan context to move forward. The plan-to-task step can turn it into reviewed To-do tasks, but it does not start Coding Assistant work.
 
-Later milestones can add plan-to-task generation and validation from approved plans.
+Generated task proposals are saved as Markdown before task files are created.

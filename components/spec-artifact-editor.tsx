@@ -17,6 +17,7 @@ const STATUS_LABELS: Record<SpecArtifactStatus, string> = {
   plan_ready: "Plan ready",
   ready_for_approval: "Ready for approval",
   approved: "Approved",
+  created: "Created",
   archived: "Archived",
 };
 
@@ -28,6 +29,7 @@ const TYPE_LABELS: Record<SpecArtifactType, string> = {
   discussion: "Discussion",
   requirements: "Requirements",
   plan: "Plan",
+  task_proposal: "Task proposal",
   decision: "Decision",
 };
 

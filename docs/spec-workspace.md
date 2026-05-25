@@ -1,6 +1,6 @@
 # Spec Workspace
 
-Symphonia is being reframed as a repository planning workspace. The current app still keeps the older repository workspace for tasks, reviews, run summaries, and `WORKFLOW.md`; the Spec Workspace extends that existing file shell with semantic Markdown files for planning and product intent.
+Symphonia is being reframed as a repository planning workspace. The current app kept the older repository workspace for tasks, reviews, run summaries, and `WORKFLOW.md`; the Spec Workspace extends that file shell with semantic Markdown files for planning and product intent.
 
 ## Repo-backed files
 
@@ -16,6 +16,7 @@ symphonia/
   discussions/
   requirements/
   plans/
+  task-proposals/
   decisions/
   tasks/
   reviews/
@@ -40,8 +41,11 @@ Spec statuses are separate from task statuses:
 
 - `draft`
 - `in_discussion`
+- `requirements_ready`
+- `plan_ready`
 - `ready_for_approval`
 - `approved`
+- `created`
 - `archived`
 
 ## Local and Private Data
@@ -50,14 +54,14 @@ The repository stores curated Markdown only. Raw Coding Assistant logs and other
 
 ## Semantic Layer
 
-The frontend treats these files as normal workspace Markdown, but the service indexes their frontmatter so the UI can show product meaning: Codebase, Milestones, Discussions, Requirements, Plans, and Decisions. Clarise-created files are not hidden implementation files; they are the same repo-backed workspace artifacts users can open and edit.
+The frontend treats these files as normal workspace Markdown, but the service indexes their metadata so the UI can show product meaning: Codebase, Milestones, Discussions, Requirements, Plans, Task proposals, and Decisions. Clarise-created files are not hidden implementation files; they are the same repo-backed workspace artifacts users can open and edit.
 
 ## Specs Versus Tasks
 
-Spec files describe intent, context, decisions, requirements, and plans. They are not executable task records.
+Spec files describe intent, context, decisions, requirements, plans, and task proposals. Task proposals are reviewable planning artifacts; they do not start work by themselves.
 
 Task files under `symphonia/tasks/` keep the existing task lifecycle: To-do, In Progress, In Review, Completed, Paused, and Canceled. Coding Assistant background runs continue to work from tasks, not directly from milestones or plans.
 
 ## Later Work
 
-This foundation lets Clarise create and update durable workspace files first. Milestone 9 adds the milestone-planning loop and plan approval. Later milestones can add plan-to-task compilation so approved plans can become Coding Assistant tasks.
+This foundation lets Clarise create and update durable workspace files first. Milestone 9 added the milestone-planning loop and plan approval. Milestone 10 adds reviewed plan-to-task generation so approved plans can become To-do tasks before any Coding Assistant work starts.

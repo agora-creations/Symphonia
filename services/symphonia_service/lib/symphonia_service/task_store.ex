@@ -6,6 +6,20 @@ defmodule SymphoniaService.TaskStore do
   alias SymphoniaService.{Lifecycle, Markdown, RepositoryRegistry}
   alias SymphoniaService.CodingAssistant.RunEvents
 
+  @generated_metadata_keys ~w(
+    type
+    source_milestone
+    source_plan
+    source_requirements
+    source_discussion
+    source_decisions
+    generated_by
+    generation_id
+    proposal_item_id
+    depends_on
+    review_expectations
+  )
+
   def list_tasks(repository) when is_map(repository) do
     repository
     |> task_glob()
@@ -42,7 +56,7 @@ defmodule SymphoniaService.TaskStore do
     body = body_from_attrs(attrs, title)
     {key, number, file_path} = next_task_key(repository)
 
-    frontmatter =
+    base_frontmatter =
       %{
         "key" => key,
         "title" => title,
@@ -55,6 +69,12 @@ defmodule SymphoniaService.TaskStore do
       }
       |> Enum.reject(fn {_key, value} -> is_nil(value) end)
       |> Map.new()
+
+    frontmatter =
+      attrs
+      |> generated_metadata()
+      |> Map.merge(base_frontmatter)
+      |> maybe_put("id", generated_task_id(attrs, key))
 
     File.write!(file_path, Markdown.serialize(frontmatter, body))
 
@@ -138,6 +158,17 @@ defmodule SymphoniaService.TaskStore do
       "reviewState" => frontmatter["review_state"],
       "reviewSummary" => frontmatter["review_summary"],
       "filesChanged" => List.wrap(frontmatter["files_changed"]) |> Enum.reject(&is_nil/1),
+      "sourceMilestone" => frontmatter["source_milestone"],
+      "sourcePlan" => frontmatter["source_plan"],
+      "sourceRequirements" => frontmatter["source_requirements"],
+      "sourceDiscussion" => frontmatter["source_discussion"],
+      "sourceDecisions" => List.wrap(frontmatter["source_decisions"]) |> Enum.reject(&is_nil/1),
+      "generatedBy" => frontmatter["generated_by"],
+      "generationId" => frontmatter["generation_id"],
+      "proposalItemId" => frontmatter["proposal_item_id"],
+      "dependsOn" => List.wrap(frontmatter["depends_on"]) |> Enum.reject(&is_nil/1),
+      "reviewExpectations" =>
+        List.wrap(frontmatter["review_expectations"]) |> Enum.reject(&is_nil/1),
       "nextStep" => frontmatter["next_step"],
       "nextReviewAction" => frontmatter["next_review_action"],
       "updatedAt" => frontmatter["updated_at"],
@@ -246,6 +277,46 @@ defmodule SymphoniaService.TaskStore do
       value when value in ["urgent", "high", "medium", "low", "no-priority"] -> value
       _ -> "no-priority"
     end
+  end
+
+  defp generated_metadata(attrs) do
+    attrs
+    |> Enum.flat_map(fn {key, value} ->
+      key = to_string(key)
+
+      if key in @generated_metadata_keys do
+        case normalize_generated_value(key, value) do
+          nil -> []
+          normalized -> [{key, normalized}]
+        end
+      else
+        []
+      end
+    end)
+    |> Map.new()
+  end
+
+  defp normalize_generated_value(key, "task") when key == "type", do: "task"
+  defp normalize_generated_value("type", _value), do: nil
+
+  defp normalize_generated_value(key, value)
+       when key in ["source_decisions", "depends_on", "review_expectations"] do
+    value
+    |> List.wrap()
+    |> Enum.map(&to_string/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp normalize_generated_value(_key, value) when is_binary(value) do
+    value = String.trim(value)
+    if value == "", do: nil, else: value
+  end
+
+  defp normalize_generated_value(_key, _value), do: nil
+
+  defp generated_task_id(attrs, key) do
+    if Map.get(attrs, "type") == "task" or Map.get(attrs, :type) == "task", do: key
   end
 
   defp string_or_nil(value) when is_binary(value) do

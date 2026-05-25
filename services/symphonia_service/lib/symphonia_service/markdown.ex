@@ -46,7 +46,18 @@ defmodule SymphoniaService.Markdown do
     "plan",
     "decisions",
     "related_milestone",
-    "approved_at"
+    "approved_at",
+    "source_milestone",
+    "source_plan",
+    "source_requirements",
+    "source_discussion",
+    "source_decisions",
+    "generated_by",
+    "generation_id",
+    "proposal_item_id",
+    "depends_on",
+    "review_expectations",
+    "created_tasks"
   ]
 
   def parse(text) when is_binary(text) do

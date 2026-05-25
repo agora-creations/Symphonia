@@ -11,6 +11,7 @@ defmodule SymphoniaService.SpecWorkspace.Templates do
     "discussion" => "Untitled discussion",
     "requirements" => "Untitled requirements",
     "plan" => "Untitled plan",
+    "task_proposal" => "Untitled task proposal",
     "decision" => "Untitled decision"
   }
 
@@ -172,6 +173,22 @@ defmodule SymphoniaService.SpecWorkspace.Templates do
     ## Consequences
 
     ## Related milestone
+    """
+  end
+
+  def body("task_proposal", id, attrs) do
+    title = string_attr(attrs, "title") || "Untitled task proposal"
+
+    """
+    # #{title}
+
+    ## Summary
+
+    ## Proposed tasks
+
+    ## Related artifacts
+
+    - Proposal: #{id}
     """
   end
 

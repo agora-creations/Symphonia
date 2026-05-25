@@ -61,6 +61,7 @@ const SPEC_SECTION_ICONS: Record<string, typeof FileText> = {
   Discussions: MessageSquareText,
   Requirements: ListChecks,
   Plans: ShieldCheck,
+  "Task proposals": ListChecks,
   Decisions: Landmark,
 };
 
@@ -72,6 +73,7 @@ const SPEC_TYPE_LABELS: Record<SpecArtifactType, string> = {
   discussion: "Discussion",
   requirements: "Requirements",
   plan: "Plan",
+  task_proposal: "Task proposal",
   decision: "Decision",
 };
 
@@ -82,6 +84,7 @@ const SPEC_STATUS_LABELS: Record<SpecArtifactStatus, string> = {
   plan_ready: "Plan ready",
   ready_for_approval: "Ready for approval",
   approved: "Approved",
+  created: "Created",
   archived: "Archived",
 };
 

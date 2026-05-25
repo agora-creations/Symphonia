@@ -15,6 +15,7 @@ export type SpecArtifactType =
   | "discussion"
   | "requirements"
   | "plan"
+  | "task_proposal"
   | "decision";
 
 export type SpecArtifactStatus =
@@ -24,6 +25,7 @@ export type SpecArtifactStatus =
   | "plan_ready"
   | "ready_for_approval"
   | "approved"
+  | "created"
   | "archived";
 
 export interface SpecWorkspaceState {
@@ -57,6 +59,14 @@ export interface SpecArtifact {
     decisions?: string[];
     related_milestone?: string;
     approved_at?: string;
+    source_milestone?: string;
+    source_plan?: string;
+    source_requirements?: string;
+    source_discussion?: string;
+    source_decisions?: string[];
+    generated_by?: string;
+    generation_id?: string;
+    created_tasks?: string[];
   };
   body: string;
 }

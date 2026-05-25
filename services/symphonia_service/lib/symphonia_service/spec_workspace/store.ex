@@ -6,7 +6,7 @@ defmodule SymphoniaService.SpecWorkspace.Store do
   alias SymphoniaService.Markdown
   alias SymphoniaService.SpecWorkspace.{Artifact, Templates}
 
-  @statuses ~w(draft in_discussion requirements_ready plan_ready ready_for_approval approved archived)
+  @statuses ~w(draft in_discussion requirements_ready plan_ready ready_for_approval approved created archived)
 
   @directories [
     "symphonia/codebase",
@@ -14,6 +14,7 @@ defmodule SymphoniaService.SpecWorkspace.Store do
     "symphonia/discussions",
     "symphonia/requirements",
     "symphonia/plans",
+    "symphonia/task-proposals",
     "symphonia/decisions",
     "symphonia/tasks",
     "symphonia/reviews",
@@ -31,6 +32,7 @@ defmodule SymphoniaService.SpecWorkspace.Store do
     "discussion" => {"discussion", "symphonia/discussions"},
     "requirements" => {"requirements", "symphonia/requirements"},
     "plan" => {"plan", "symphonia/plans"},
+    "task_proposal" => {"task-proposal", "symphonia/task-proposals"},
     "decision" => {"decision", "symphonia/decisions"}
   }
 

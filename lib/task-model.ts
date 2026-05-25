@@ -98,6 +98,16 @@ export interface ServiceTask {
   reviewState?: "approved" | "changes_requested" | string;
   reviewSummary?: string;
   filesChanged: string[];
+  sourceMilestone?: string;
+  sourcePlan?: string;
+  sourceRequirements?: string;
+  sourceDiscussion?: string;
+  sourceDecisions?: string[];
+  generatedBy?: string;
+  generationId?: string;
+  proposalItemId?: string;
+  dependsOn?: string[];
+  reviewExpectations?: string[];
   nextStep?: "open_pull_request" | "refresh_pr_status" | string;
   nextReviewAction?: string;
   updatedAt?: string;

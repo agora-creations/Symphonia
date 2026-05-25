@@ -13,7 +13,7 @@ defmodule SymphoniaService.HTTPServer do
     Workspace
   }
 
-  alias SymphoniaService.Clarise.MilestoneLoop
+  alias SymphoniaService.Clarise.{MilestoneLoop, PlanToTaskCompiler}
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
 
   def start_link(opts) do
@@ -312,6 +312,14 @@ defmodule SymphoniaService.HTTPServer do
       ["api", "repositories", repo, "clarise", "milestones", milestone, "approve"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, MilestoneLoop.approve(repository, milestone, decode_json(body))}
+
+      ["api", "repositories", repo, "clarise", "milestones", milestone, "tasks", "propose"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {201, PlanToTaskCompiler.propose(repository, milestone, decode_json(body))}
+
+      ["api", "repositories", repo, "clarise", "milestones", milestone, "tasks", "create"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {201, PlanToTaskCompiler.create_tasks(registry_path, repository, milestone, decode_json(body))}
 
       ["api", "repositories", repo, "github", "link"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)

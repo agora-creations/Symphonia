@@ -6,13 +6,17 @@ import type { ReactNode } from "react";
 import {
   CheckCircle2,
   Circle,
+  ClipboardList,
+  ExternalLink,
   FileText,
   ListChecks,
   MessageSquareText,
   Milestone,
   PenLine,
   Plus,
+  RefreshCcw,
   ShieldCheck,
+  X,
 } from "lucide-react";
 import type {
   SpecArtifact,
@@ -44,6 +48,35 @@ type LoopPayload = {
   error?: string;
 };
 
+type TaskProposalItem = {
+  id: string;
+  title: string;
+  priority: string;
+  depends_on: string[];
+  goal: string;
+  implementation_notes: string[];
+  acceptance_criteria: string[];
+  review_expectations: string[];
+  related_artifacts: string[];
+};
+
+type GeneratedTask = {
+  key: string;
+  title: string;
+  status: string;
+  dependsOn?: string[];
+};
+
+type TaskProposalPayload = {
+  proposal?: SpecArtifact;
+  items?: TaskProposalItem[];
+  tasks?: GeneratedTask[];
+  createdTasks?: string[];
+  createdCount?: number;
+  generationId?: string;
+  error?: string;
+};
+
 const QUESTIONS: Question[] = [
   { id: "accomplish", question: "What should this milestone accomplish?" },
   { id: "why", question: "Why does it matter?" },
@@ -61,6 +94,7 @@ const STATUS_LABELS: Record<SpecArtifactStatus, string> = {
   plan_ready: "Plan ready",
   ready_for_approval: "Ready for approval",
   approved: "Approved",
+  created: "Created",
   archived: "Archived",
 };
 
@@ -84,6 +118,7 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [decisionTitle, setDecisionTitle] = useState("");
   const [decisionBody, setDecisionBody] = useState("");
+  const [taskProposal, setTaskProposal] = useState<TaskProposalPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +145,7 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
           setSelectedMilestoneId(null);
           setMilestone(null);
           setLinked({});
+          setTaskProposal(null);
           return;
         }
 
@@ -119,6 +155,7 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
         setTitle(nextMilestone.title);
         setGoal(sectionFromBody(nextMilestone.body, "Goal"));
         setLinked(await fetchLinkedArtifacts(repoKey, nextMilestone));
+        setTaskProposal(await fetchExistingTaskProposal(repoKey, nextMilestone.id));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not load workspace");
       } finally {
@@ -223,6 +260,44 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
       setDecisionTitle("");
       setDecisionBody("");
     });
+  };
+
+  const runTaskCompiler = async (
+    key: string,
+    action: () => Promise<TaskProposalPayload>,
+    success: string,
+  ) => {
+    setPending(key);
+    setError(null);
+    setNotice(null);
+    try {
+      const payload = await action();
+      setTaskProposal(payload);
+      setNotice(success);
+      window.dispatchEvent(new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Clarise could not generate tasks");
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const generateTaskProposal = (regenerate = false) => {
+    if (!milestone) return;
+    void runTaskCompiler(
+      "task-propose",
+      () => postTaskCompiler(repoKey, milestone.id, "propose", { regenerate }),
+      "Task proposal generated.",
+    );
+  };
+
+  const createTasksFromProposal = () => {
+    if (!milestone) return;
+    void runTaskCompiler(
+      "task-create",
+      () => postTaskCompiler(repoKey, milestone.id, "create", {}),
+      "Tasks created.",
+    );
   };
 
   if (loading) {
@@ -359,12 +434,24 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
                     <div>
                       <h2 className="text-base font-semibold">Milestone approved</h2>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        The milestone is ready for later task generation. This milestone does not create
-                        tasks or start Coding Assistant work yet.
+                        Clarise can now turn this plan into implementation tasks. Creating tasks does
+                        not start Coding Assistant work.
                       </p>
                     </div>
                   </div>
                 </section>
+              )}
+
+              {milestone.status === "approved" && (
+                <TaskProposalPanel
+                  repoSlug={repoSlug}
+                  proposal={taskProposal}
+                  pending={pending}
+                  onGenerate={() => generateTaskProposal(false)}
+                  onRegenerate={() => generateTaskProposal(true)}
+                  onCreate={createTasksFromProposal}
+                  onCancel={() => setTaskProposal(null)}
+                />
               )}
             </>
           )}
@@ -704,6 +791,187 @@ function DecisionPanel({
   );
 }
 
+function TaskProposalPanel({
+  repoSlug,
+  proposal,
+  pending,
+  onGenerate,
+  onRegenerate,
+  onCreate,
+  onCancel,
+}: {
+  repoSlug: string;
+  proposal: TaskProposalPayload | null;
+  pending: string | null;
+  onGenerate: () => void;
+  onRegenerate: () => void;
+  onCreate: () => void;
+  onCancel: () => void;
+}) {
+  const items = proposal?.items ?? [];
+  const createdTasks = proposal?.createdTasks ?? metadataList(proposal?.proposal, "created_tasks");
+  const hasCreatedTasks = createdTasks.length > 0;
+  const isPending = pending === "task-propose" || pending === "task-create";
+
+  return (
+    <section className="border-y py-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold">Implementation tasks</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Clarise proposes task files for review first. You create them only after the
+            breakdown looks right.
+          </p>
+        </div>
+        {proposal?.proposal && (
+          <Link
+            href={`/r/${repoSlug}/workspace/task_proposal/${encodeURIComponent(proposal.proposal.id)}`}
+            className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted"
+          >
+            <ExternalLink className="h-4 w-4" />
+            Open proposal
+          </Link>
+        )}
+      </div>
+
+      {!proposal && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-3">
+          <div>
+            <p className="text-sm font-medium">Milestone approved</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Clarise can now turn this plan into implementation tasks.
+            </p>
+          </div>
+          <button
+            onClick={onGenerate}
+            disabled={isPending}
+            className="inline-flex items-center gap-2 rounded-md border bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ClipboardList className="h-4 w-4" />
+            {pending === "task-propose" ? "Generating..." : "Generate implementation tasks"}
+          </button>
+        </div>
+      )}
+
+      {proposal && items.length === 0 && !hasCreatedTasks && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-3">
+          <div>
+            <p className="text-sm font-medium">Saved proposal found</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Open the Markdown proposal, or regenerate the review list here.
+            </p>
+          </div>
+          <button
+            onClick={onGenerate}
+            disabled={isPending}
+            className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ClipboardList className="h-4 w-4" />
+            {pending === "task-propose" ? "Generating..." : "Generate implementation tasks"}
+          </button>
+        </div>
+      )}
+
+      {items.length > 0 && !hasCreatedTasks && (
+        <div className="mt-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-medium">Clarise proposed {items.length} tasks.</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={onCreate}
+                disabled={isPending}
+                className="inline-flex items-center gap-2 rounded-md border bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                {pending === "task-create" ? "Creating..." : "Create tasks"}
+              </button>
+              <button
+                onClick={onRegenerate}
+                disabled={isPending}
+                className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCcw className="h-4 w-4" />
+                Regenerate
+              </button>
+              <button
+                onClick={onCancel}
+                disabled={isPending}
+                className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+                Cancel
+              </button>
+            </div>
+          </div>
+          <div className="divide-y rounded-md border">
+            {items.map((item, index) => (
+              <TaskProposalItemRow key={item.id} item={item} index={index} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {hasCreatedTasks && (
+        <div className="mt-4 rounded-md border px-3 py-3">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-500" />
+            <div>
+              <p className="text-sm font-medium">Tasks created</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                These tasks are on the task board as To-do. Assigning a task to the Coding
+                Assistant remains a separate action.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {createdTasks.map((key) => (
+                  <Link
+                    key={key}
+                    href={`/r/${repoSlug}/tasks/${encodeURIComponent(key)}`}
+                    className="rounded-full border px-2 py-1 text-xs hover:bg-muted"
+                  >
+                    {key}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TaskProposalItemRow({ item, index }: { item: TaskProposalItem; index: number }) {
+  return (
+    <article className="grid gap-3 p-3 md:grid-cols-[2.5rem_minmax(0,1fr)_minmax(12rem,16rem)]">
+      <div className="grid h-8 w-8 place-items-center rounded-md bg-muted text-xs font-medium">
+        {index + 1}
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold">{item.title}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{item.id}</p>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.goal}</p>
+        {item.review_expectations.length > 0 && (
+          <div className="mt-3">
+            <p className="text-xs font-medium text-muted-foreground">Review expectations</p>
+            <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
+              {item.review_expectations.map((expectation) => (
+                <li key={expectation}>{expectation}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+      <div className="space-y-2 text-xs text-muted-foreground">
+        <MetaLine label="Priority" value={item.priority} />
+        <MetaLine
+          label="Depends on"
+          value={item.depends_on.length > 0 ? item.depends_on.join(", ") : "None"}
+        />
+      </div>
+    </article>
+  );
+}
+
 function MetaLine({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -768,6 +1036,22 @@ async function fetchLinkedArtifacts(repoKey: string, milestone: SpecArtifact): P
   return Object.fromEntries(entries) as LinkedArtifacts;
 }
 
+async function fetchExistingTaskProposal(
+  repoKey: string,
+  milestoneId: string,
+): Promise<TaskProposalPayload | null> {
+  try {
+    const proposal = await fetchArtifact(repoKey, "task_proposal", `${milestoneId}-task-proposal`);
+    return {
+      proposal,
+      createdTasks: metadataList(proposal, "created_tasks"),
+      generationId: metadataString(proposal, "generation_id"),
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function postLoop(repoKey: string, path: string, body: unknown): Promise<LoopPayload> {
   const res = await fetch(
     `/api/repositories/${encodeURIComponent(repoKey)}/clarise/milestones/${path}`,
@@ -779,6 +1063,27 @@ async function postLoop(repoKey: string, path: string, body: unknown): Promise<L
   );
   const payload = (await res.json()) as LoopPayload;
   if (!res.ok) throw new Error(payload.error ?? "Clarise could not update the milestone");
+  return payload;
+}
+
+async function postTaskCompiler(
+  repoKey: string,
+  milestoneId: string,
+  action: "propose" | "create",
+  body: unknown,
+): Promise<TaskProposalPayload> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/clarise/milestones/${encodeURIComponent(
+      milestoneId,
+    )}/tasks/${action}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  const payload = (await res.json()) as TaskProposalPayload;
+  if (!res.ok) throw new Error(payload.error ?? "Clarise could not generate tasks");
   return payload;
 }
 
@@ -801,9 +1106,14 @@ function workflowIndex(milestone: SpecArtifact | null, linked: LinkedArtifacts):
   return 1;
 }
 
-function metadataString(artifact: SpecArtifact, key: "discussion" | "requirements" | "plan"): string {
+function metadataString(artifact: SpecArtifact, key: string): string {
   const value = artifact.metadata[key];
   return typeof value === "string" ? value : "";
+}
+
+function metadataList(artifact: SpecArtifact | undefined, key: string): string[] {
+  const value = artifact?.metadata[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function sectionFromBody(body: string, heading: string): string {
