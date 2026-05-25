@@ -56,6 +56,7 @@ defmodule SymphoniaService.CodingAssistantTest do
     previous_app_id = System.get_env("SYMPHONIA_GITHUB_APP_ID")
     previous_private_key = System.get_env("SYMPHONIA_GITHUB_APP_PRIVATE_KEY_PATH")
     previous_runs_root = System.get_env("SYMPHONIA_RUNS_ROOT")
+    previous_provider = Application.get_env(:symphonia_service, :coding_assistant_provider)
 
     System.put_env("SYMPHONIA_GITHUB_APP_ID", "42")
     System.put_env("SYMPHONIA_GITHUB_APP_PRIVATE_KEY_PATH", private_key_path)
@@ -64,12 +65,19 @@ defmodule SymphoniaService.CodingAssistantTest do
     Application.put_env(:symphonia_service, :github_client, StubClient)
     Application.put_env(:symphonia_service, :github_home, github_home)
 
+    Application.put_env(
+      :symphonia_service,
+      :coding_assistant_provider,
+      SymphoniaService.CodingAssistant.LocalDemoProvider
+    )
+
     on_exit(fn ->
       restore_env("SYMPHONIA_GITHUB_APP_ID", previous_app_id)
       restore_env("SYMPHONIA_GITHUB_APP_PRIVATE_KEY_PATH", previous_private_key)
       restore_env("SYMPHONIA_RUNS_ROOT", previous_runs_root)
       Application.delete_env(:symphonia_service, :github_client)
       Application.delete_env(:symphonia_service, :github_home)
+      restore_app_env(:coding_assistant_provider, previous_provider)
       File.rm_rf(root)
     end)
 
@@ -335,6 +343,7 @@ defmodule SymphoniaService.CodingAssistantTest do
     assert result["run"]["state"] == "failed"
     assert result["task"]["status"] == "paused"
     assert result["task"]["pausedReason"] == "run_failed"
+
     assert result["task"]["pausedExplanation"] ==
              "The Coding Assistant could not produce a new handoff after your requested changes."
 
@@ -400,4 +409,7 @@ defmodule SymphoniaService.CodingAssistantTest do
 
   defp restore_env(key, nil), do: System.delete_env(key)
   defp restore_env(key, value), do: System.put_env(key, value)
+
+  defp restore_app_env(key, nil), do: Application.delete_env(:symphonia_service, key)
+  defp restore_app_env(key, value), do: Application.put_env(:symphonia_service, key, value)
 end

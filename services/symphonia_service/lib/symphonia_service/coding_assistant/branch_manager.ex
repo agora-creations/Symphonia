@@ -12,7 +12,7 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
     token = Auth.token_for_repository(github["owner"], github["name"])
     repo_path = repository["path"]
     base_branch = github["default_branch"] || "main"
-    head_branch = "symphonia/task/#{slug(task["key"])}"
+    head_branch = task_branch(task)
     previous_branch = current_branch(repo_path)
 
     remote_url =
@@ -33,7 +33,106 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
     %{"head_branch" => head_branch, "base_branch" => base_branch, "files_changed" => [file_path]}
   end
 
-  defp github_repo!(repository) do
+  def with_task_branch_worktree(repository, task, fun) when is_function(fun, 1) do
+    ensure_repo_ready_for_task_branch!(repository, task)
+
+    github = github_repo!(repository)
+    token = Auth.token_for_repository(github["owner"], github["name"])
+    repo_path = repository["path"]
+    base_branch = github["default_branch"] || "main"
+    head_branch = task_branch(task)
+    worktree_path = temp_worktree_path(task)
+
+    remote_url =
+      github["clone_url"] || "https://github.com/#{github["owner"]}/#{github["name"]}.git"
+
+    try do
+      with_auth(token, fn auth ->
+        fetch_base!(repo_path, remote_url, base_branch, auth)
+        add_worktree!(repo_path, worktree_path, head_branch, base_branch)
+
+        context = %{
+          auth: auth,
+          base_branch: base_branch,
+          head_branch: head_branch,
+          remote_url: remote_url,
+          repo_path: worktree_path,
+          source_repo_path: repo_path
+        }
+
+        case fun.(context) do
+          {:ok, result} ->
+            {:ok,
+             Map.merge(result, %{
+               "head_branch" => head_branch,
+               "base_branch" => base_branch,
+               "worktree_path" => worktree_path
+             })}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+      end)
+    after
+      remove_worktree(repo_path, worktree_path)
+    end
+  end
+
+  def ensure_repo_ready_for_task_branch!(repository, task) do
+    repo_path = repository["path"]
+
+    cond do
+      blank?(repo_path) or not File.dir?(repo_path) ->
+        raise ArgumentError,
+              "The Coding Assistant can't start because the repository path is missing."
+
+      not git_repo?(repo_path) ->
+        raise ArgumentError,
+              "The Coding Assistant can't start because this folder is not a Git repository."
+
+      true ->
+        :ok
+    end
+
+    github_repo!(repository)
+    ensure_task_branch_name!(task_branch(task))
+    ensure_clean_tracked_worktree!(repo_path)
+    :ok
+  end
+
+  def commit_files!(context, task, files) when is_list(files) do
+    files = Enum.reject(files, &blank?/1)
+
+    if files == [] do
+      raise ArgumentError, "The Coding Assistant did not produce any files that can be reviewed."
+    end
+
+    git!(context.repo_path, ["add", "--" | files])
+
+    git!(
+      context.repo_path,
+      @git_author ++ ["commit", "-m", "#{task["key"]} coding assistant changes", "--" | files]
+    )
+  end
+
+  def push_task_branch!(context) do
+    push_branch!(context.repo_path, context.remote_url, context.head_branch, context.auth)
+  end
+
+  def revert_paths!(repo_path, paths) when is_list(paths) do
+    paths = Enum.reject(paths, &blank?/1)
+
+    if paths != [] do
+      git(repo_path, ["checkout", "--" | paths])
+      git(repo_path, ["clean", "-fd", "--" | paths])
+    end
+
+    :ok
+  end
+
+  def task_branch(task), do: "symphonia/task/#{slug(task["key"])}"
+
+  def github_repo!(repository) do
     link = RepositoryLink.link(repository) || %{}
 
     owner = link["owner"]
@@ -52,9 +151,63 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
     }
   end
 
+  defp git_repo?(repo_path) do
+    case git(repo_path, ["rev-parse", "--is-inside-work-tree"]) do
+      {:ok, "true"} -> true
+      _ -> false
+    end
+  end
+
+  defp ensure_clean_tracked_worktree!(repo_path) do
+    case git(repo_path, ["status", "--porcelain", "--untracked-files=no"]) do
+      {:ok, ""} ->
+        :ok
+
+      {:ok, status} ->
+        dirty_work_product_files =
+          status
+          |> changed_paths()
+          |> Enum.reject(&metadata_path?/1)
+
+        if dirty_work_product_files == [] do
+          :ok
+        else
+          raise ArgumentError,
+                "The Coding Assistant can't start because this repository has uncommitted changes."
+        end
+
+      {:error, output} ->
+        raise ArgumentError, clean_git_error(output)
+    end
+  end
+
+  defp ensure_task_branch_name!("symphonia/task/" <> rest) when rest != "", do: :ok
+
+  defp ensure_task_branch_name!(_branch) do
+    raise ArgumentError,
+          "The Coding Assistant can't start because the task branch name is invalid."
+  end
+
   defp fetch_base!(repo_path, remote_url, base_branch, askpass) do
     ref = "refs/heads/#{base_branch}:refs/remotes/symphonia/#{base_branch}"
     git!(repo_path, ["fetch", "--depth=1", remote_url, ref], askpass)
+  end
+
+  defp add_worktree!(repo_path, worktree_path, head_branch, base_branch) do
+    File.rm_rf(worktree_path)
+
+    git!(
+      repo_path,
+      [
+        "worktree",
+        "add",
+        "--force",
+        "-B",
+        head_branch,
+        worktree_path,
+        "refs/remotes/symphonia/#{base_branch}"
+      ]
+    )
   end
 
   defp checkout_branch!(repo_path, head_branch, base_branch) do
@@ -89,6 +242,35 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
       askpass
     )
   end
+
+  defp remove_worktree(repo_path, worktree_path) do
+    git(repo_path, ["worktree", "remove", "--force", worktree_path])
+    File.rm_rf(worktree_path)
+    :ok
+  end
+
+  defp changed_paths(status) do
+    status
+    |> String.split("\n", trim: true)
+    |> Enum.map(fn line ->
+      path = String.slice(line, 3..-1//1) || ""
+
+      case String.split(path, " -> ", parts: 2) do
+        [_from, to] -> String.trim(to)
+        [single] -> String.trim(single)
+      end
+    end)
+  end
+
+  defp metadata_path?(".symphonia/" <> _rest), do: true
+  defp metadata_path?("symphonia/tasks/" <> _rest), do: true
+  defp metadata_path?("symphonia/run-summaries/" <> _rest), do: true
+  defp metadata_path?("WORKFLOW.md"), do: true
+  defp metadata_path?("registry.json"), do: true
+  defp metadata_path?("repositories.json"), do: true
+  defp metadata_path?("symphonia/registry.json"), do: true
+  defp metadata_path?("symphonia/repositories.json"), do: true
+  defp metadata_path?(_path), do: false
 
   defp remote_head(repo_path, remote_url, head_branch, askpass) do
     case git(repo_path, ["ls-remote", remote_url, "refs/heads/#{head_branch}"], askpass) do
@@ -144,6 +326,13 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
 
   defp askpass_path do
     Path.join(System.tmp_dir!(), "symphonia-git-askpass-#{System.unique_integer([:positive])}.sh")
+  end
+
+  defp temp_worktree_path(task) do
+    Path.join(
+      System.tmp_dir!(),
+      "symphonia-codex-worktree-#{slug(task["key"])}-#{System.unique_integer([:positive])}"
+    )
   end
 
   defp git!(repo_path, args, askpass \\ nil) do

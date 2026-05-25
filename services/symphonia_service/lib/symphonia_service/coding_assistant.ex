@@ -4,7 +4,14 @@ defmodule SymphoniaService.CodingAssistant do
   """
 
   alias SymphoniaService.Clarise.{ChecklistSerializer, FeedbackStructurer, ReviewNotesBuilder}
-  alias SymphoniaService.CodingAssistant.{HandoffBuilder, LocalDemoProvider, RunStore}
+
+  alias SymphoniaService.CodingAssistant.{
+    CodexProvider,
+    HandoffBuilder,
+    LocalDemoProvider,
+    RunStore
+  }
+
   alias SymphoniaService.TaskStore
 
   @continuation_max_attempts 2
@@ -17,7 +24,7 @@ defmodule SymphoniaService.CodingAssistant do
 
     run =
       RunStore.create(%{
-        "provider" => "local_demo",
+        "provider" => provider_id(provider),
         "repository" => repository["key"],
         "task" => task_key
       })
@@ -36,7 +43,11 @@ defmodule SymphoniaService.CodingAssistant do
 
         task =
           TaskStore.apply_event(repository, task_key, "fail_run", %{
-            "explanation" => "The Coding Assistant could not produce a reviewable handoff."
+            "explanation" =>
+              failure_explanation(
+                reason,
+                "The Coding Assistant could not produce a reviewable handoff."
+              )
           })
 
         %{"run" => RunStore.public(failed_run), "task" => task}
@@ -87,13 +98,20 @@ defmodule SymphoniaService.CodingAssistant do
     raise ArgumentError, "Request changes is available for In Review tasks."
   end
 
-  defp run_continuation_attempt(repository, task_key, review_note, assistant_input, params, attempt) do
+  defp run_continuation_attempt(
+         repository,
+         task_key,
+         review_note,
+         assistant_input,
+         params,
+         attempt
+       ) do
     provider = provider()
     task = get_task!(repository, task_key)
 
     run =
       RunStore.create(%{
-        "provider" => "local_demo",
+        "provider" => provider_id(provider),
         "repository" => repository["key"],
         "task" => task_key,
         "kind" => "review_continuation",
@@ -133,7 +151,10 @@ defmodule SymphoniaService.CodingAssistant do
         else
           TaskStore.apply_event(repository, task_key, "fail_run", %{
             "explanation" =>
-              "The Coding Assistant could not produce a new handoff after your requested changes."
+              failure_explanation(
+                reason,
+                "The Coding Assistant could not produce a new handoff after your requested changes."
+              )
           })
 
           task =
@@ -206,6 +227,36 @@ defmodule SymphoniaService.CodingAssistant do
   end
 
   defp provider do
-    Application.get_env(:symphonia_service, :coding_assistant_provider, LocalDemoProvider)
+    Application.get_env(:symphonia_service, :coding_assistant_provider) ||
+      provider_from_env(System.get_env("SYMPHONIA_CODING_ASSISTANT_PROVIDER"))
   end
+
+  defp provider_from_env("local_demo"), do: LocalDemoProvider
+  defp provider_from_env("demo"), do: LocalDemoProvider
+  defp provider_from_env(_value), do: CodexProvider
+
+  defp provider_id(provider) do
+    if Code.ensure_loaded?(provider) and function_exported?(provider, :id, 0) do
+      provider.id()
+    else
+      "coding_assistant"
+    end
+  end
+
+  defp failure_explanation(reason, fallback) when is_binary(reason) do
+    reason = String.trim(reason)
+
+    if public_failure_reason?(reason) do
+      reason
+    else
+      fallback
+    end
+  end
+
+  defp failure_explanation(_reason, fallback), do: fallback
+
+  defp public_failure_reason?("The Coding Assistant can't start" <> _rest), do: true
+  defp public_failure_reason?("The Coding Assistant did not produce" <> _rest), do: true
+  defp public_failure_reason?("The Coding Assistant could not finish" <> _rest), do: true
+  defp public_failure_reason?(_reason), do: false
 end

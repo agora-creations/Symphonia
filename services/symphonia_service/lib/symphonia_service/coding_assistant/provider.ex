@@ -6,5 +6,9 @@ defmodule SymphoniaService.CodingAssistant.Provider do
   handoff. Raw provider logs stay in the run store, not in repository files.
   """
 
+  @callback id() :: String.t()
+  @callback preflight(map(), map(), map()) :: :ok | {:error, String.t()}
   @callback run(map(), map(), map(), map()) :: {:ok, map()} | {:error, String.t()}
+
+  @optional_callbacks preflight: 3
 end

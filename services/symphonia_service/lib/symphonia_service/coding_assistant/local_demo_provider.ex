@@ -8,6 +8,9 @@ defmodule SymphoniaService.CodingAssistant.LocalDemoProvider do
   alias SymphoniaService.CodingAssistant.{BranchManager, HandoffBuilder}
 
   @impl true
+  def id, do: "local_demo"
+
+  @impl true
   def run(repository, task, _run, params) do
     if force_failure?(params) do
       {:error, "The Coding Assistant could not produce a reviewable handoff."}

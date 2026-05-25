@@ -38,11 +38,23 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
     }
   end
 
+  def build_from_changes(_task, branch, files_changed, summary \\ nil) do
+    files_changed = Enum.sort(files_changed)
+
+    %{
+      "summary" => clean_summary(summary, files_changed),
+      "files_changed" => files_changed,
+      "next_review_action" => "Review the changed files and approve them to open a pull request.",
+      "head_branch" => branch["head_branch"],
+      "base_branch" => branch["base_branch"]
+    }
+  end
+
   def apply(repository, task_key, run, handoff) do
     TaskStore.patch_task(repository, task_key, %{
       "frontmatter" => %{
         "status" => "in_review",
-        "assistant" => "local_demo",
+        "assistant" => run["provider"] || "coding_assistant",
         "paused_reason" => nil,
         "paused_explanation" => nil,
         "review_approved" => false,
@@ -60,5 +72,22 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
         "handoff" => handoff
       }
     })
+  end
+
+  defp clean_summary(summary, files_changed) when is_binary(summary) do
+    summary
+    |> String.trim()
+    |> case do
+      "" -> fallback_summary(files_changed)
+      value -> value
+    end
+  end
+
+  defp clean_summary(_summary, files_changed), do: fallback_summary(files_changed)
+
+  defp fallback_summary(files_changed) do
+    count = Enum.count(files_changed)
+    suffix = if count == 1, do: "file", else: "files"
+    "The Coding Assistant updated #{count} #{suffix}."
   end
 end

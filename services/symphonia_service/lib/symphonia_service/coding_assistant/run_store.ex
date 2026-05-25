@@ -42,6 +42,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
     now = now()
 
     run
+    |> reload(opts)
     |> Map.merge(%{
       "state" => "completed",
       "completed_at" => now,
@@ -56,6 +57,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
     now = now()
 
     run
+    |> reload(opts)
     |> Map.merge(%{
       "state" => "failed",
       "completed_at" => now,
@@ -63,6 +65,15 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "error" => reason
     })
     |> append_log("Coding Assistant run failed: #{reason}")
+    |> save(opts)
+  end
+
+  def record_provider_output(run, attrs, opts \\ []) when is_map(attrs) do
+    latest = reload(run, opts)
+    existing = Map.get(latest, "provider_output", %{})
+
+    latest
+    |> Map.put("provider_output", Map.merge(existing, attrs))
     |> save(opts)
   end
 
@@ -84,6 +95,15 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
     Keyword.get(opts, :root) ||
       System.get_env("SYMPHONIA_RUNS_ROOT") ||
       Path.join([System.user_home!(), ".symphonia", "runs"])
+  end
+
+  defp reload(run, opts) do
+    path = path(run, opts)
+
+    case File.read(path) do
+      {:ok, body} -> JSON.decode!(body)
+      {:error, _reason} -> run
+    end
   end
 
   defp save(run, opts) do
