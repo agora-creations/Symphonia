@@ -88,6 +88,12 @@ defmodule SymphoniaService.CodingAssistant.RunSupervisor do
       "state" => run["state"],
       "current_step" => run["current_step"],
       "message" => RunEvents.public_message(run),
+      "workspace_path" => run["workspace_path"],
+      "codex_thread_id" => run["codex_thread_id"],
+      "turn_id" => run["turn_id"],
+      "eligibility_reason" => run["eligibility_reason"],
+      "review_branch" => run["review_branch"],
+      "curated_summary_path" => run["curated_summary_path"],
       "started_at" => run["started_at"],
       "completed_at" => run["completed_at"]
     }

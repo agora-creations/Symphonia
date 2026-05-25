@@ -11,6 +11,7 @@ import {
   TASK_STATUS_ORDER,
   pausedReasonLabel,
   type ServiceTask,
+  type TaskEligibilityExplanation,
   type TaskLifecycleEvent,
   type TaskStatus,
 } from "@/lib/task-model";
@@ -19,8 +20,10 @@ import { PriorityIcon } from "@/components/icons/status-icons";
 import { UserAvatar } from "@/components/avatar-stack";
 import { useNewTask } from "@/components/new-task-dialog";
 import { cn } from "@/lib/utils";
-import type { WorkspaceState } from "@/lib/repository-model";
+import { harnessLabel, harnessStatusForTask, isActiveRun } from "@/lib/harness-ui-model";
+import type { RepositoryAutomationState, WorkspaceState } from "@/lib/repository-model";
 import {
+  Bot,
   Filter,
   Plus,
   SlidersHorizontal,
@@ -35,6 +38,40 @@ async function fetchTasks(repoKey: string): Promise<ServiceTask[]> {
   if (!res.ok) throw new Error("Could not load tasks");
   const payload = (await res.json()) as { tasks: ServiceTask[] };
   return payload.tasks;
+}
+
+async function fetchAutomation(repoKey: string): Promise<RepositoryAutomationState> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/automation`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as {
+    automation?: RepositoryAutomationState;
+    error?: string;
+  };
+  if (!res.ok || !payload.automation) {
+    throw new Error(payload.error ?? "Could not load automation");
+  }
+  return payload.automation;
+}
+
+async function fetchEligibility(
+  repoKey: string,
+  taskKey: string,
+): Promise<TaskEligibilityExplanation> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+      taskKey,
+    )}/harness/eligibility`,
+    { cache: "no-store" },
+  );
+  const payload = (await res.json()) as {
+    eligibility?: TaskEligibilityExplanation;
+    error?: string;
+  };
+  if (!res.ok || !payload.eligibility) {
+    throw new Error(payload.error ?? "Could not load task eligibility");
+  }
+  return payload.eligibility;
 }
 
 async function postTaskEvent(
@@ -141,6 +178,7 @@ function TaskCard({
   repoSlug,
   onEvent,
   pending,
+  eligibility,
 }: {
   task: ServiceTask;
   repoSlug: string;
@@ -149,9 +187,11 @@ function TaskCard({
     action: TaskAction,
   ) => void;
   pending: boolean;
+  eligibility?: TaskEligibilityExplanation;
 }) {
   const pausedReason = pausedReasonLabel(task.pausedReason);
   const activeRun = task.run && isActiveRun(task.run) ? task.run : null;
+  const harnessStatus = harnessStatusForTask(task, eligibility);
   return (
     <article className="rounded-md border bg-card p-2.5 text-card-foreground shadow-sm transition-colors hover:border-foreground/20">
       <Link href={`/r/${repoSlug}/tasks/${encodeURIComponent(task.key)}`} className="block">
@@ -176,6 +216,21 @@ function TaskCard({
               {activeRun.currentStep ?? activeRun.label ?? "Working"}
             </span>
           )}
+          {harnessStatus && (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px]",
+                harnessStatus.tone === "ready"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  : harnessStatus.tone === "warning"
+                    ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                    : "text-muted-foreground",
+              )}
+              title={harnessStatus.reason}
+            >
+              {harnessStatus.label}
+            </span>
+          )}
           {task.project && (
             <span className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] text-muted-foreground">
               {task.project}
@@ -197,6 +252,7 @@ function TaskRow({
   repoSlug,
   onEvent,
   pending,
+  eligibility,
 }: {
   task: ServiceTask;
   repoSlug: string;
@@ -205,9 +261,11 @@ function TaskRow({
     action: TaskAction,
   ) => void;
   pending: boolean;
+  eligibility?: TaskEligibilityExplanation;
 }) {
   const pausedReason = pausedReasonLabel(task.pausedReason);
   const activeRun = task.run && isActiveRun(task.run) ? task.run : null;
+  const harnessStatus = harnessStatusForTask(task, eligibility);
   return (
     <div className="grid grid-cols-[1.5rem_4.5rem_1fr_auto] items-center gap-3 border-b px-4 py-2 last:border-b-0 hover:bg-muted/40">
       <Link
@@ -235,6 +293,21 @@ function TaskRow({
         {activeRun && (
           <span className="hidden md:inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-600 dark:text-sky-400">
             {activeRun.currentStep ?? activeRun.label ?? "Working"}
+          </span>
+        )}
+        {harnessStatus && (
+          <span
+            className={cn(
+              "hidden md:inline-flex rounded-full border px-1.5 py-0.5 text-[10px]",
+              harnessStatus.tone === "ready"
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                : harnessStatus.tone === "warning"
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  : "text-muted-foreground",
+            )}
+            title={harnessStatus.reason}
+          >
+            {harnessStatus.label}
           </span>
         )}
         {task.assignee && <UserAvatar user={task.assignee} size={20} />}
@@ -281,6 +354,10 @@ export function TasksView({ repoKey }: { repoKey: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
+  const [automation, setAutomation] = useState<RepositoryAutomationState | null>(null);
+  const [eligibilityByTask, setEligibilityByTask] = useState<
+    Record<string, TaskEligibilityExplanation>
+  >({});
   const [workspacePending, setWorkspacePending] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [sourceMilestone, setSourceMilestone] = useState<string | null>(null);
@@ -377,11 +454,12 @@ export function TasksView({ repoKey }: { repoKey: string }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([fetchWorkspace(repoKey), fetchTasks(repoKey)])
-      .then(([nextWorkspace, nextTasks]) => {
+    Promise.all([fetchWorkspace(repoKey), fetchTasks(repoKey), fetchAutomation(repoKey)])
+      .then(([nextWorkspace, nextTasks, nextAutomation]) => {
         if (!cancelled) {
           setWorkspace(nextWorkspace);
           setTasks(nextTasks);
+          setAutomation(nextAutomation);
         }
       })
       .catch((err: unknown) => {
@@ -394,6 +472,33 @@ export function TasksView({ repoKey }: { repoKey: string }) {
       cancelled = true;
     };
   }, [repoKey]);
+
+  const todoTaskKeys = useMemo(
+    () => tasks.filter((task) => task.status === "todo").map((task) => task.key).join(","),
+    [tasks],
+  );
+
+  useEffect(() => {
+    const keys = todoTaskKeys.split(",").filter(Boolean);
+    if (keys.length === 0) {
+      setEligibilityByTask({});
+      return;
+    }
+
+    let cancelled = false;
+    Promise.all(
+      keys.map(async (key) => [key, await fetchEligibility(repoKey, key)] as const),
+    )
+      .then((entries) => {
+        if (!cancelled) setEligibilityByTask(Object.fromEntries(entries));
+      })
+      .catch(() => {
+        if (!cancelled) setEligibilityByTask({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repoKey, todoTaskKeys]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -461,6 +566,17 @@ export function TasksView({ repoKey }: { repoKey: string }) {
           <span className="text-muted-foreground">·</span>
           <span className="text-muted-foreground">Tasks</span>
           <span className="text-muted-foreground tabular-nums">{filtered.length}</span>
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
+              automation?.enabled
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                : "text-muted-foreground",
+            )}
+          >
+            <Bot className="h-3 w-3" />
+            {harnessLabel(automation)}
+          </span>
           {sourceMilestone && (
             <span className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
               {sourceMilestone}
@@ -521,6 +637,13 @@ export function TasksView({ repoKey }: { repoKey: string }) {
       {error && (
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
           {error}
+        </div>
+      )}
+
+      {automation && !automation.enabled && !loading && (
+        <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+          Codex harness automation is disabled for this repository. Manual assign, retry, approve,
+          and request-changes actions remain available.
         </div>
       )}
 
@@ -621,6 +744,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
                       repoSlug={repoSlug}
                       onEvent={onEvent}
                       pending={pendingKey === i.key}
+                      eligibility={eligibilityByTask[i.key]}
                     />
                   ))}
                   {grouped[s].length === 0 && (
@@ -652,6 +776,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
                     repoSlug={repoSlug}
                     onEvent={onEvent}
                     pending={pendingKey === i.key}
+                    eligibility={eligibilityByTask[i.key]}
                   />
                 ))}
               </section>
@@ -754,8 +879,4 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
     case "canceled":
       return [];
   }
-}
-
-function isActiveRun(run: ServiceTask["run"]): boolean {
-  return run?.state === "queued" || run?.state === "running";
 }

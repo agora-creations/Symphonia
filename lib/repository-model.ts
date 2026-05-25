@@ -89,10 +89,18 @@ export interface RepositorySummary {
   name: string;
   path: string;
   github?: GitHubRepositoryLink | null;
+  automation?: RepositoryAutomationState | null;
   last_task_number?: number;
   lastTaskNumber?: number;
   taskCount?: number;
   workspace?: WorkspaceState;
+}
+
+export interface RepositoryAutomationState {
+  enabled: boolean;
+  provider?: "codex_app_server" | "codex" | "local_demo" | string;
+  enabledAt?: string;
+  disabledAt?: string;
 }
 
 export interface GitHubConnectionState {

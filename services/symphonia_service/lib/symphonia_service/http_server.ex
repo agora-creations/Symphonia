@@ -15,6 +15,7 @@ defmodule SymphoniaService.HTTPServer do
 
   alias SymphoniaService.Clarise.{MilestoneLoop, PlanToTaskCompiler}
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
+  alias SymphoniaService.Harness.{Automation, Daemon, Eligibility}
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
@@ -152,6 +153,14 @@ defmodule SymphoniaService.HTTPServer do
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "github" => RepositoryLink.state(repository)}}
 
+      ["api", "repositories", repo, "automation"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, %{"repo" => repository["key"], "automation" => Automation.status(repository)}}
+
+      ["api", "harness", "daemon"] ->
+        Daemon.ensure_started(registry_path)
+        {200, %{"daemon" => Daemon.status()}}
+
       ["api", "repositories", repo, "workflow"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "workflow" => Workspace.workflow(repository)}}
@@ -172,6 +181,25 @@ defmodule SymphoniaService.HTTPServer do
         repository = RepositoryRegistry.get!(registry_path, repo)
         run = CodingAssistant.get_run(repository, task_key, run_id)
         {200, %{"run" => run}}
+
+      [
+        "api",
+        "repositories",
+        repo,
+        "tasks",
+        task_key,
+        "coding-assistant",
+        "runs",
+        run_id,
+        "events"
+      ] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        events = CodingAssistant.get_run_events(repository, task_key, run_id)
+        {200, %{"events" => events}}
+
+      ["api", "repositories", repo, "tasks", task_key, "harness", "eligibility"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, %{"eligibility" => Eligibility.explain(repository, task_key)}}
 
       _ ->
         {404, %{"error" => "Not found"}}
@@ -319,12 +347,26 @@ defmodule SymphoniaService.HTTPServer do
 
       ["api", "repositories", repo, "clarise", "milestones", milestone, "tasks", "create"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
-        {201, PlanToTaskCompiler.create_tasks(registry_path, repository, milestone, decode_json(body))}
+
+        {201,
+         PlanToTaskCompiler.create_tasks(registry_path, repository, milestone, decode_json(body))}
 
       ["api", "repositories", repo, "github", "link"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         github = RepositoryLink.link(registry_path, repository, decode_json(body))
         {200, %{"repo" => repository["key"], "github" => github}}
+
+      ["api", "repositories", repo, "automation", "enable"] ->
+        repository = Automation.enable(registry_path, repo, decode_json(body))
+        {200, %{"repo" => repository["key"], "automation" => Automation.status(repository)}}
+
+      ["api", "repositories", repo, "automation", "disable"] ->
+        repository = Automation.disable(registry_path, repo)
+        {200, %{"repo" => repository["key"], "automation" => Automation.status(repository)}}
+
+      ["api", "harness", "daemon", "tick"] ->
+        Daemon.ensure_started(registry_path)
+        {200, Daemon.tick()}
 
       ["api", "repositories", repo, "workflow", "from-template"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -494,7 +536,8 @@ defmodule SymphoniaService.HTTPServer do
     |> Map.merge(%{
       "workspace" => workspace,
       "taskCount" => task_count,
-      "github" => RepositoryLink.link(repository)
+      "github" => RepositoryLink.link(repository),
+      "automation" => Automation.status(repository)
     })
   end
 

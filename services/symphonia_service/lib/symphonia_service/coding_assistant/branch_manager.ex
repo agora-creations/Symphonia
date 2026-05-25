@@ -78,6 +78,49 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
     end
   end
 
+  def with_persistent_task_branch_worktree(repository, task, fun) when is_function(fun, 1) do
+    ensure_repo_ready_for_task_branch!(repository, task)
+
+    github = github_repo!(repository)
+    token = Auth.token_for_repository(github["owner"], github["name"])
+    repo_path = repository["path"]
+    base_branch = github["default_branch"] || "main"
+    head_branch = task_branch(task)
+    worktree_path = SymphoniaService.Harness.TaskWorkspace.path(repository, task)
+
+    remote_url =
+      github["clone_url"] || "https://github.com/#{github["owner"]}/#{github["name"]}.git"
+
+    with_auth(token, fn auth ->
+      fetch_base!(repo_path, remote_url, base_branch, auth)
+      fetch_branch(repo_path, remote_url, head_branch, auth)
+      prepare_persistent_worktree!(repo_path, worktree_path, head_branch, base_branch)
+
+      context = %{
+        auth: auth,
+        base_branch: base_branch,
+        head_branch: head_branch,
+        remote_url: remote_url,
+        repo_path: worktree_path,
+        source_repo_path: repo_path,
+        persistent: true
+      }
+
+      case fun.(context) do
+        {:ok, result} ->
+          {:ok,
+           Map.merge(result, %{
+             "head_branch" => head_branch,
+             "base_branch" => base_branch,
+             "worktree_path" => worktree_path
+           })}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end)
+  end
+
   def ensure_repo_ready_for_task_branch!(repository, task) do
     repo_path = repository["path"]
 
@@ -117,6 +160,19 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
 
   def push_task_branch!(context) do
     push_branch!(context.repo_path, context.remote_url, context.head_branch, context.auth)
+  end
+
+  def review_branch_exists?(repository, task) do
+    github = github_repo!(repository)
+    token = Auth.token_for_repository(github["owner"], github["name"])
+    repo_path = repository["path"]
+
+    remote_url =
+      github["clone_url"] || "https://github.com/#{github["owner"]}/#{github["name"]}.git"
+
+    with_auth(token, fn auth ->
+      not is_nil(remote_head(repo_path, remote_url, task_branch(task), auth))
+    end)
   end
 
   def revert_paths!(repo_path, paths) when is_list(paths) do
@@ -193,6 +249,12 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
     git!(repo_path, ["fetch", "--depth=1", remote_url, ref], askpass)
   end
 
+  defp fetch_branch(repo_path, remote_url, branch, askpass) do
+    ref = "refs/heads/#{branch}:refs/remotes/symphonia/#{branch}"
+    git(repo_path, ["fetch", "--depth=1", remote_url, ref], askpass)
+    :ok
+  end
+
   defp add_worktree!(repo_path, worktree_path, head_branch, base_branch) do
     File.rm_rf(worktree_path)
 
@@ -208,6 +270,41 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
         "refs/remotes/symphonia/#{base_branch}"
       ]
     )
+  end
+
+  defp prepare_persistent_worktree!(repo_path, worktree_path, head_branch, base_branch) do
+    worktree_path |> Path.dirname() |> File.mkdir_p!()
+    start_ref = persistent_start_ref(repo_path, head_branch, base_branch)
+
+    if git_repo?(worktree_path) do
+      git!(worktree_path, ["checkout", "-B", head_branch, start_ref])
+      git!(worktree_path, ["reset", "--hard", start_ref])
+      git!(worktree_path, ["clean", "-fd"])
+    else
+      File.rm_rf(worktree_path)
+
+      git!(
+        repo_path,
+        [
+          "worktree",
+          "add",
+          "--force",
+          "-B",
+          head_branch,
+          worktree_path,
+          start_ref
+        ]
+      )
+    end
+  end
+
+  defp persistent_start_ref(repo_path, head_branch, base_branch) do
+    head_ref = "refs/remotes/symphonia/#{head_branch}"
+
+    case git(repo_path, ["rev-parse", "--verify", head_ref]) do
+      {:ok, _sha} -> head_ref
+      _ -> "refs/remotes/symphonia/#{base_branch}"
+    end
   end
 
   defp checkout_branch!(repo_path, head_branch, base_branch) do

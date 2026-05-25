@@ -42,6 +42,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "updated_at" => now,
       "current_step" => RunEvents.default_step("running")
     })
+    |> append_timeline_entry(%{"label" => RunEvents.default_step("running"), "at" => now})
     |> append_log("Coding Assistant run started.")
     |> save(opts)
   end
@@ -50,6 +51,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
     run
     |> reload(opts)
     |> Map.merge(%{"current_step" => step, "updated_at" => now()})
+    |> append_timeline_entry(%{"label" => step})
     |> append_log(step)
     |> save(opts)
   end
@@ -66,6 +68,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "current_step" => RunEvents.default_step("completed"),
       "handoff" => handoff
     })
+    |> append_timeline_entry(%{"label" => RunEvents.default_step("completed"), "at" => now})
     |> append_log("Coding Assistant run completed.")
     |> save(opts)
   end
@@ -84,6 +87,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "error" => reason
     })
     |> reject_nil()
+    |> append_timeline_entry(%{"label" => RunEvents.default_step("failed"), "at" => now})
     |> append_log("Coding Assistant run failed: #{reason}")
     |> save(opts)
   end
@@ -101,6 +105,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "message" => "Run canceled. The task is paused. You can retry when ready.",
       "canceled_reason" => reason
     })
+    |> append_timeline_entry(%{"label" => RunEvents.default_step("canceled"), "at" => now})
     |> append_log("Coding Assistant run canceled.")
     |> save(opts)
   end
@@ -114,17 +119,57 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
     |> save(opts)
   end
 
+  def update_metadata(run, attrs, opts \\ []) when is_map(attrs) do
+    run
+    |> reload(opts)
+    |> Map.merge(attrs)
+    |> Map.put("updated_at", now())
+    |> reject_nil()
+    |> save(opts)
+  end
+
+  def append_timeline(run, attrs, opts \\ []) when is_map(attrs) do
+    run
+    |> reload(opts)
+    |> append_timeline_entry(attrs)
+    |> save(opts)
+  end
+
   def public(run) do
     %{
       "id" => run["id"],
       "state" => run["state"],
+      "provider" => run["provider"],
       "label" => RunEvents.label(run["state"]),
       "currentStep" => run["current_step"] || RunEvents.default_step(run["state"]),
       "message" => RunEvents.public_message(run),
+      "workspacePath" => run["workspace_path"],
+      "codexThreadId" => run["codex_thread_id"],
+      "turnId" => run["turn_id"],
+      "eligibilityReason" => run["eligibility_reason"],
+      "reviewBranch" => run["review_branch"],
+      "curatedSummaryPath" => run["curated_summary_path"],
+      "timeline" => public_events(run),
       "startedAt" => run["started_at"],
       "completedAt" => run["completed_at"]
     }
     |> reject_nil()
+  end
+
+  def public_events(run) do
+    run
+    |> Map.get("timeline", [])
+    |> List.wrap()
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(fn event ->
+      %{
+        "at" => event["at"],
+        "label" => event["label"],
+        "threadId" => event["thread_id"],
+        "turnId" => event["turn_id"]
+      }
+      |> reject_nil()
+    end)
   end
 
   def get(id, opts \\ []) when is_binary(id) do
@@ -189,8 +234,23 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "attempt",
       "max_attempts",
       "message",
-      "current_step"
+      "current_step",
+      "workspace_path",
+      "codex_thread_id",
+      "turn_id",
+      "eligibility_reason",
+      "review_branch",
+      "curated_summary_path"
     ])
+  end
+
+  defp append_timeline_entry(run, attrs) do
+    event =
+      attrs
+      |> Map.put_new("at", now())
+      |> reject_nil()
+
+    Map.update(run, "timeline", [event], &(List.wrap(&1) ++ [event]))
   end
 
   defp run_id do

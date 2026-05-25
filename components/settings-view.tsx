@@ -8,12 +8,13 @@ import {
   type ExternalIssue,
   type ImportSource,
 } from "@/data/mock";
-import type {
-  GitHubConnectionState,
-} from "@/lib/repository-model";
+import { automationLabel, daemonLabel } from "@/lib/harness-ui-model";
+import type { GitHubConnectionState, RepositoryAutomationState } from "@/lib/repository-model";
 import {
   User as UserIcon,
+  Activity,
   Bell,
+  Bot,
   Palette,
   KeyRound,
   Building2,
@@ -26,6 +27,7 @@ import {
   Link2,
   ChevronRight,
   ChevronDown,
+  Power,
 } from "lucide-react";
 
 type SectionId =
@@ -251,6 +253,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
               description="Connect Symphonia to the tools your team already uses."
             >
               <GitHubIntegration repoKey={repoKey} />
+              <AutomationIntegration repoKey={repoKey} />
               <IntegrationRow
                 source="linear"
                 name="Linear"
@@ -321,6 +324,164 @@ async function fetchGitHubConnection(): Promise<GitHubConnectionState> {
   const payload = (await res.json()) as { connection?: GitHubConnectionState; error?: string };
   if (!res.ok || !payload.connection) throw new Error(payload.error ?? "Could not load GitHub connection");
   return payload.connection;
+}
+
+interface HarnessDaemonStatus {
+  running: boolean;
+  intervalMs?: number;
+  recentDecisions?: {
+    at?: string;
+    repo?: string;
+    task?: string;
+    code?: string;
+    dispatched?: boolean;
+    reason?: string;
+  }[];
+}
+
+async function fetchAutomation(repoKey: string): Promise<RepositoryAutomationState> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/automation`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as {
+    automation?: RepositoryAutomationState;
+    error?: string;
+  };
+  if (!res.ok || !payload.automation) {
+    throw new Error(payload.error ?? "Could not load automation state");
+  }
+  return payload.automation;
+}
+
+async function fetchDaemonStatus(): Promise<HarnessDaemonStatus> {
+  const res = await fetch("/api/harness/daemon", { cache: "no-store" });
+  const payload = (await res.json()) as { daemon?: HarnessDaemonStatus; error?: string };
+  if (!res.ok || !payload.daemon) {
+    throw new Error(payload.error ?? "Could not load daemon status");
+  }
+  return payload.daemon;
+}
+
+async function setAutomationEnabled(
+  repoKey: string,
+  enabled: boolean,
+): Promise<RepositoryAutomationState> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/automation/${
+      enabled ? "enable" : "disable"
+    }`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: enabled ? JSON.stringify({ provider: "codex_app_server" }) : undefined,
+    },
+  );
+  const payload = (await res.json()) as {
+    automation?: RepositoryAutomationState;
+    error?: string;
+  };
+  if (!res.ok || !payload.automation) {
+    throw new Error(payload.error ?? "Could not update automation");
+  }
+  return payload.automation;
+}
+
+function AutomationIntegration({ repoKey }: { repoKey: string }) {
+  const [automation, setAutomation] = useState<RepositoryAutomationState | null>(null);
+  const [daemon, setDaemon] = useState<HarnessDaemonStatus | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchAutomation(repoKey), fetchDaemonStatus()])
+      .then(([nextAutomation, nextDaemon]) => {
+        if (cancelled) return;
+        setAutomation(nextAutomation);
+        setDaemon(nextDaemon);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load automation");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repoKey]);
+
+  const toggleAutomation = async () => {
+    const nextEnabled = !automation?.enabled;
+    setPending(true);
+    setError(null);
+    try {
+      const nextAutomation = await setAutomationEnabled(repoKey, nextEnabled);
+      setAutomation(nextAutomation);
+      if (nextAutomation.enabled) setDaemon(await fetchDaemonStatus());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update automation");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const lastDecision = daemon?.recentDecisions?.[0];
+
+  return (
+    <div className="rounded-md border">
+      <div className="flex items-start justify-between gap-3 p-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-8 w-8 place-items-center rounded-md bg-muted text-foreground">
+            <Bot className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-medium">Codex Harness</div>
+            <div className="text-xs text-muted-foreground">
+              Automatically dispatch eligible Clarise tasks through Codex App Server.
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md border px-2 py-0.5",
+                  automation?.enabled
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "text-muted-foreground",
+                )}
+              >
+                <Power className="h-3 w-3" />
+                {automationLabel(automation)}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-muted-foreground">
+                <Activity className="h-3 w-3" />
+                {daemonLabel(daemon)}
+              </span>
+              <span className="rounded-md border px-2 py-0.5 text-muted-foreground">
+                {automation?.provider ?? "codex_app_server"}
+              </span>
+            </div>
+            {lastDecision?.reason && (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Last decision: {lastDecision.task} · {lastDecision.reason}
+              </div>
+            )}
+            {error && (
+              <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">{error}</div>
+            )}
+          </div>
+        </div>
+        <button
+          onClick={toggleAutomation}
+          disabled={pending || automation == null}
+          className={cn(
+            "shrink-0 rounded-md border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+            automation?.enabled
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              : "hover:bg-accent",
+          )}
+        >
+          {pending ? "Updating..." : automation?.enabled ? "Disable" : "Enable"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function GitHubIntegration({ repoKey }: { repoKey: string }) {

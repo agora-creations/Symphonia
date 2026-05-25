@@ -89,7 +89,20 @@ defmodule SymphoniaService.Markdown do
 
   @nested_orders %{
     "review_continuation" => ["attempt", "max_attempts", "source_review_note_id"],
-    "run" => ["id", "state", "current_step", "message", "started_at", "completed_at"],
+    "run" => [
+      "id",
+      "state",
+      "current_step",
+      "message",
+      "workspace_path",
+      "codex_thread_id",
+      "turn_id",
+      "eligibility_reason",
+      "review_branch",
+      "curated_summary_path",
+      "started_at",
+      "completed_at"
+    ],
     "github" => ["repo", "issue", "pull_request"],
     "repo" => ["owner", "name", "url"],
     "issue" => ["owner", "repo", "number", "url", "state"],
@@ -108,7 +121,8 @@ defmodule SymphoniaService.Markdown do
       "files_changed",
       "next_review_action",
       "head_branch",
-      "base_branch"
+      "base_branch",
+      "curated_summary_path"
     ]
   }
 

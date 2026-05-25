@@ -17,13 +17,21 @@ import {
   pausedReasonLabel,
   type ReviewNote,
   type CodingAssistantRun,
+  type CodingAssistantRunEvent,
   type ServiceTask,
+  type TaskEligibilityExplanation,
   type TaskLifecycleEvent,
 } from "@/lib/task-model";
 import { TaskStatusIcon } from "@/components/icons/task-status-icons";
 import { PriorityIcon } from "@/components/icons/status-icons";
 import { useClarise } from "@/components/clarise";
 import { cn } from "@/lib/utils";
+import {
+  activeRunPollingTarget,
+  isActiveRun,
+  reviewHandoffForTask,
+  runTimelineForTask,
+} from "@/lib/harness-ui-model";
 
 interface Props {
   repoKey: string;
@@ -38,6 +46,26 @@ async function fetchTask(repoKey: string, taskKey: string): Promise<ServiceTask>
   if (!res.ok) throw new Error("Task not found");
   const payload = (await res.json()) as { task: ServiceTask };
   return payload.task;
+}
+
+async function fetchEligibility(
+  repoKey: string,
+  taskKey: string,
+): Promise<TaskEligibilityExplanation> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+      taskKey,
+    )}/harness/eligibility`,
+    { cache: "no-store" },
+  );
+  const payload = (await res.json()) as {
+    eligibility?: TaskEligibilityExplanation;
+    error?: string;
+  };
+  if (!res.ok || !payload.eligibility) {
+    throw new Error(payload.error ?? "Could not load task eligibility");
+  }
+  return payload.eligibility;
 }
 
 async function patchTask(
@@ -132,6 +160,25 @@ async function fetchCodingAssistantRun(
   return data.run;
 }
 
+async function fetchCodingAssistantRunEvents(
+  repoKey: string,
+  taskKey: string,
+  runId: string,
+): Promise<CodingAssistantRunEvent[]> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+      taskKey,
+    )}/coding-assistant/runs/${encodeURIComponent(runId)}/events`,
+    { cache: "no-store" },
+  );
+  const data = (await res.json()) as {
+    events?: CodingAssistantRunEvent[];
+    error?: string;
+  };
+  if (!res.ok || !data.events) throw new Error(data.error ?? "Could not load run events");
+  return data.events;
+}
+
 async function cancelCodingAssistantRun(
   repoKey: string,
   taskKey: string,
@@ -208,6 +255,8 @@ type TaskAction =
  */
 export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
   const [task, setTask] = useState<ServiceTask | null>(null);
+  const [eligibility, setEligibility] = useState<TaskEligibilityExplanation | null>(null);
+  const [runEvents, setRunEvents] = useState<CodingAssistantRunEvent[]>([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -225,10 +274,12 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    fetchTask(repoKey, taskKey)
-      .then((loaded) => {
+    Promise.all([fetchTask(repoKey, taskKey), fetchEligibility(repoKey, taskKey).catch(() => null)])
+      .then(([loaded, loadedEligibility]) => {
         if (cancelled) return;
         setTask(loaded);
+        setEligibility(loadedEligibility);
+        setRunEvents(loaded.run?.timeline ?? []);
         setTitle(loaded.title);
         setBody(loaded.body);
         setDirty(false);
@@ -246,25 +297,31 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
   }, [repoKey, taskKey]);
 
   useEffect(() => {
-    if (!task?.run || !isActiveRun(task.run)) return;
+    const activeRunId = activeRunPollingTarget(task);
+    if (!task || !activeRunId) return;
 
     let cancelled = false;
     const refresh = async () => {
       try {
-        const [updatedTask, updatedRun] = await Promise.all([
+        const [updatedTask, updatedRun, updatedEvents] = await Promise.all([
           fetchTask(repoKey, task.key),
-          fetchCodingAssistantRun(repoKey, task.key, task.run!.id),
+          fetchCodingAssistantRun(repoKey, task.key, activeRunId),
+          fetchCodingAssistantRunEvents(repoKey, task.key, activeRunId).catch(() => []),
         ]);
         if (cancelled) return;
         const nextTask = { ...updatedTask, run: updatedRun };
         setTask(nextTask);
+        setRunEvents(updatedEvents.length > 0 ? updatedEvents : (updatedRun.timeline ?? []));
         setTitle(nextTask.title);
         setBody(nextTask.body);
         setDirty(false);
       } catch {
         if (!cancelled) {
           const updatedTask = await fetchTask(repoKey, task.key);
-          if (!cancelled) setTask(updatedTask);
+          if (!cancelled) {
+            setTask(updatedTask);
+            setRunEvents(updatedTask.run?.timeline ?? []);
+          }
         }
       }
     };
@@ -277,6 +334,25 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     };
   }, [repoKey, task?.key, task?.run?.id, task?.run?.state]);
 
+  useEffect(() => {
+    if (!task?.run?.id) {
+      setRunEvents([]);
+      return;
+    }
+
+    let cancelled = false;
+    fetchCodingAssistantRunEvents(repoKey, task.key, task.run.id)
+      .then((events) => {
+        if (!cancelled) setRunEvents(events);
+      })
+      .catch(() => {
+        if (!cancelled) setRunEvents(task.run?.timeline ?? []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repoKey, task?.key, task?.run?.id]);
+
   const pausedReason = pausedReasonLabel(task?.pausedReason);
   const activeRun = task?.run && isActiveRun(task.run) ? task.run : null;
 
@@ -287,6 +363,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     try {
       const updated = await patchTask(repoKey, task.key, { title, body });
       setTask(updated);
+      setRunEvents(updated.run?.timeline ?? runEvents);
       setTitle(updated.title);
       setBody(updated.body);
       setDirty(false);
@@ -308,6 +385,8 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     try {
       const updated = await postTaskEvent(repoKey, task.key, event, params);
       setTask(updated);
+      setEligibility(await fetchEligibility(repoKey, task.key).catch(() => eligibility));
+      setRunEvents(updated.run?.timeline ?? runEvents);
       setTitle(updated.title);
       setBody(updated.body);
       setDirty(false);
@@ -346,6 +425,8 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
           ? await openPullRequest(repoKey, task.key)
           : await refreshPullRequest(repoKey, task.key);
       setTask(updated);
+      setEligibility(await fetchEligibility(repoKey, task.key).catch(() => eligibility));
+      setRunEvents(updated.run?.timeline ?? runEvents);
       setTitle(updated.title);
       setBody(updated.body);
       setDirty(false);
@@ -375,6 +456,8 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     try {
       const { task: updated } = await requestTaskChanges(repoKey, task.key, trimmed);
       setTask(updated);
+      setEligibility(await fetchEligibility(repoKey, task.key).catch(() => eligibility));
+      setRunEvents(updated.run?.timeline ?? runEvents);
       setTitle(updated.title);
       setBody(updated.body);
       setDirty(false);
@@ -451,6 +534,19 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
             {task.pausedExplanation}
           </div>
         )}
+
+      {eligibility && task.status === "todo" && (
+        <div
+          className={cn(
+            "border-b px-4 py-2 text-xs",
+            eligibility.eligible
+              ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+              : "bg-amber-500/10 text-amber-800 dark:text-amber-200",
+          )}
+        >
+          Harness {eligibility.eligible ? "eligible" : "not eligible"}: {eligibility.reason}
+        </div>
+      )}
 
       <div className="flex flex-1 min-h-0">
         <main className="min-w-0 flex-1 overflow-y-auto">
@@ -605,20 +701,24 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
         </main>
 
         <aside className="hidden w-80 shrink-0 overflow-y-auto border-l bg-muted/20 p-3 text-xs md:block">
-          <TaskMeta task={task} />
+          <TaskMeta task={task} eligibility={eligibility} runEvents={runEvents} />
         </aside>
       </div>
     </div>
   );
 }
 
-function TaskMeta({ task }: { task: ServiceTask }) {
-  const handoffSummary = task.handoff?.summary ?? task.reviewSummary;
-  const handoffFiles =
-    task.handoff && task.handoff.filesChanged.length > 0
-      ? task.handoff.filesChanged
-      : task.filesChanged;
-  const nextReviewAction = task.handoff?.nextReviewAction ?? task.nextReviewAction;
+function TaskMeta({
+  task,
+  eligibility,
+  runEvents,
+}: {
+  task: ServiceTask;
+  eligibility: TaskEligibilityExplanation | null;
+  runEvents: CodingAssistantRunEvent[];
+}) {
+  const handoff = reviewHandoffForTask(task);
+  const timeline = runTimelineForTask(task, runEvents);
 
   return (
     <div className="space-y-4">
@@ -648,35 +748,93 @@ function TaskMeta({ task }: { task: ServiceTask }) {
           <span>{task.assistant || "Not assigned"}</span>
         </div>
       </Section>
+      <Section title="Harness">
+        {eligibility ? (
+          <div className="space-y-2">
+            <span
+              className={cn(
+                "inline-flex rounded-md border px-2 py-0.5",
+                eligibility.eligible
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+              )}
+            >
+              {eligibility.eligible ? "Eligible" : "Not eligible"}
+            </span>
+            <p className="text-muted-foreground">{eligibility.reason}</p>
+          </div>
+        ) : (
+          <span className="text-muted-foreground">No eligibility check loaded</span>
+        )}
+      </Section>
       {task.run && (
         <Section title="Run">
           <div className="space-y-1 text-muted-foreground">
             <p className="font-mono text-[11px]">{task.run.id}</p>
+            {task.run.provider && <p>{task.run.provider}</p>}
             <p>{task.run.label ?? task.run.state}</p>
             {task.run.currentStep && <p>{task.run.currentStep}</p>}
             {task.run.message && <p>{task.run.message}</p>}
+            {task.run.workspacePath && (
+              <p className="break-all font-mono text-[11px]">{task.run.workspacePath}</p>
+            )}
+            {(task.run.codexThreadId || task.run.turnId) && (
+              <p className="font-mono text-[11px]">
+                {task.run.codexThreadId ?? "no-thread"} / {task.run.turnId ?? "no-turn"}
+              </p>
+            )}
+            {task.run.reviewBranch && (
+              <p className="break-all font-mono text-[11px]">{task.run.reviewBranch}</p>
+            )}
+            {task.run.curatedSummaryPath && (
+              <p className="break-all font-mono text-[11px]">{task.run.curatedSummaryPath}</p>
+            )}
           </div>
         </Section>
       )}
+      {timeline.length > 0 && (
+        <Section title="Run timeline">
+          <ol className="space-y-2">
+            {timeline.map((event, index) => (
+              <li key={`${event.at ?? "event"}-${index}`} className="border-l pl-2">
+                <p>{event.label ?? "Run event"}</p>
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  {event.at ?? "time not recorded"}
+                </p>
+                {(event.threadId || event.turnId) && (
+                  <p className="font-mono text-[10px] text-muted-foreground">
+                    {event.threadId ?? "no-thread"} / {event.turnId ?? "no-turn"}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ol>
+        </Section>
+      )}
       <Section title="Review handoff">
-        {handoffSummary ? (
+        {handoff.summary ? (
           <div className="space-y-2">
-            <p className="text-muted-foreground">{handoffSummary}</p>
-            {handoffFiles.length > 0 && (
+            <p className="text-muted-foreground">{handoff.summary}</p>
+            {handoff.files.length > 0 && (
               <ul className="space-y-1 font-mono text-[11px] text-muted-foreground">
-                {handoffFiles.map((file) => (
+                {handoff.files.map((file) => (
                   <li key={file}>{file}</li>
                 ))}
               </ul>
             )}
-            {task.handoff?.headBranch && (
+            {handoff.branch && (
               <p className="font-mono text-[11px] text-muted-foreground">
-                {task.handoff.headBranch} → {task.handoff.baseBranch ?? "main"}
+                {handoff.branch}
               </p>
             )}
-            {nextReviewAction && (
+            {handoff.curatedSummaryPath && (
+              <p className="break-all font-mono text-[11px] text-muted-foreground">
+                {handoff.curatedSummaryPath}
+              </p>
+            )}
+            {handoff.nextReviewAction && (
               <p className="text-[11px] text-muted-foreground">
-                Next: {nextReviewAction}
+                Next: {handoff.nextReviewAction}
               </p>
             )}
           </div>
@@ -820,8 +978,4 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
     case "canceled":
       return [];
   }
-}
-
-function isActiveRun(run: CodingAssistantRun): boolean {
-  return run.state === "queued" || run.state === "running";
 }

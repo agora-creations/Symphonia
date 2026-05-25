@@ -395,6 +395,12 @@ defmodule SymphoniaService.TaskStore do
       "label" => RunEvents.label(run["state"]),
       "currentStep" => run["current_step"] || RunEvents.default_step(run["state"]),
       "message" => RunEvents.public_message(run),
+      "workspacePath" => run["workspace_path"],
+      "codexThreadId" => run["codex_thread_id"],
+      "turnId" => run["turn_id"],
+      "eligibilityReason" => run["eligibility_reason"],
+      "reviewBranch" => run["review_branch"],
+      "curatedSummaryPath" => run["curated_summary_path"],
       "startedAt" => run["started_at"],
       "completedAt" => run["completed_at"]
     }
@@ -410,7 +416,8 @@ defmodule SymphoniaService.TaskStore do
       "filesChanged" => List.wrap(handoff["files_changed"]) |> Enum.reject(&is_nil/1),
       "nextReviewAction" => handoff["next_review_action"],
       "headBranch" => handoff["head_branch"],
-      "baseBranch" => handoff["base_branch"]
+      "baseBranch" => handoff["base_branch"],
+      "curatedSummaryPath" => handoff["curated_summary_path"]
     }
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
     |> Map.new()

@@ -1,0 +1,409 @@
+defmodule SymphoniaService.CodingAssistant.AppServerClient do
+  @moduledoc """
+  Minimal JSON-RPC client for Codex App Server task turns.
+
+  Request shapes are kept aligned with the generated schema bundle in
+  `priv/codex_app_server_schema`.
+  """
+
+  @default_timeout_ms 900_000
+  @schema_files [
+    "ClientRequest.json",
+    "v2/ThreadStartParams.json",
+    "v2/ThreadResumeParams.json",
+    "v2/TurnStartParams.json",
+    "v2/TurnCompletedNotification.json"
+  ]
+
+  def ensure_schema_bundle! do
+    for file <- @schema_files do
+      path = Path.join(schema_root(), file)
+
+      unless File.exists?(path) do
+        raise ArgumentError,
+              "Codex App Server schema is missing at #{path}. Regenerate with `codex app-server generate-json-schema --experimental --out services/symphonia_service/priv/codex_app_server_schema`."
+      end
+    end
+
+    :ok
+  end
+
+  def ensure_daemon!(opts \\ []) do
+    if truthy?(System.get_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON")) do
+      :ok
+    else
+      bin = codex_bin!(opts)
+
+      case System.cmd(bin, ["app-server", "daemon", "start"], stderr_to_stdout: true) do
+        {_output, 0} -> :ok
+        {output, _status} -> raise ArgumentError, clean_output(output)
+      end
+    end
+  end
+
+  def run_turn(workspace_path, prompt, opts \\ []) do
+    ensure_schema_bundle!()
+    ensure_daemon!(opts)
+
+    port = open_port(opts)
+
+    try do
+      events = []
+      {_result, events} = initialize!(port, events, opts)
+
+      {thread_id, events} =
+        case Keyword.get(opts, :thread_id) do
+          value when is_binary(value) and value != "" ->
+            resume_thread!(port, value, workspace_path, events, opts)
+
+          _ ->
+            start_thread!(port, workspace_path, events, opts)
+        end
+
+      {turn_id, events} = start_turn!(port, thread_id, workspace_path, prompt, events, opts)
+      {events, completed} = wait_for_turn_completed(port, thread_id, turn_id, events, opts)
+
+      {:ok,
+       %{
+         "thread_id" => thread_id,
+         "turn_id" => turn_id,
+         "events" => events,
+         "last_message" => last_message(events),
+         "turn" => completed
+       }}
+    catch
+      {:app_server_error, reason, events} ->
+        {:error, reason, events}
+    after
+      close_port(port)
+    end
+  end
+
+  defp initialize!(port, events, opts) do
+    request!(
+      port,
+      "initialize",
+      %{
+        "clientInfo" => %{"name" => "symphonia", "title" => "Symphonía", "version" => "0.1.0"},
+        "capabilities" => %{"experimentalApi" => true}
+      },
+      events,
+      opts
+    )
+  end
+
+  defp start_thread!(port, workspace_path, events, opts) do
+    params =
+      %{
+        "approvalPolicy" => "never",
+        "approvalsReviewer" => "auto_review",
+        "cwd" => workspace_path,
+        "runtimeWorkspaceRoots" => [workspace_path],
+        "sandbox" => "workspace-write",
+        "serviceName" => "symphonia",
+        "threadSource" => "subagent"
+      }
+      |> maybe_put("model", configured_model())
+
+    {result, events} = request!(port, "thread/start", params, events, opts)
+
+    thread_id =
+      get_in(result, ["thread", "id"]) || get_in(result, ["thread", "threadId"]) ||
+        result["threadId"]
+
+    if blank?(thread_id) do
+      throw({:app_server_error, "Codex App Server did not return a thread id.", events})
+    end
+
+    {thread_id, events}
+  end
+
+  defp resume_thread!(port, thread_id, workspace_path, events, opts) do
+    params =
+      %{
+        "approvalPolicy" => "never",
+        "approvalsReviewer" => "auto_review",
+        "cwd" => workspace_path,
+        "excludeTurns" => true,
+        "runtimeWorkspaceRoots" => [workspace_path],
+        "sandbox" => "workspace-write",
+        "threadId" => thread_id
+      }
+      |> maybe_put("model", configured_model())
+
+    {_result, events} = request!(port, "thread/resume", params, events, opts)
+    {thread_id, events}
+  end
+
+  defp start_turn!(port, thread_id, workspace_path, prompt, events, opts) do
+    params = %{
+      "approvalPolicy" => "never",
+      "approvalsReviewer" => "auto_review",
+      "cwd" => workspace_path,
+      "input" => [%{"type" => "text", "text" => prompt}],
+      "runtimeWorkspaceRoots" => [workspace_path],
+      "threadId" => thread_id
+    }
+
+    {result, events} = request!(port, "turn/start", params, events, opts)
+
+    turn_id =
+      get_in(result, ["turn", "id"]) || get_in(result, ["turn", "turnId"]) || result["turnId"]
+
+    if blank?(turn_id) do
+      throw({:app_server_error, "Codex App Server did not return a turn id.", events})
+    end
+
+    {turn_id, events}
+  end
+
+  defp request!(port, method, params, events, opts) do
+    id = next_request_id()
+    send_request(port, id, method, params)
+    wait_for_response(port, id, events, opts)
+  end
+
+  defp wait_for_response(port, id, events, opts) do
+    {message, events} = receive_message(port, events, opts)
+
+    cond do
+      message["id"] == id and is_map(message["result"]) ->
+        {message["result"], events}
+
+      message["id"] == id and is_map(message["error"]) ->
+        throw({:app_server_error, jsonrpc_error(message["error"]), events})
+
+      true ->
+        wait_for_response(port, id, events, opts)
+    end
+  end
+
+  defp wait_for_turn_completed(port, thread_id, turn_id, events, opts) do
+    {message, events} = receive_message(port, events, opts)
+
+    case message do
+      %{"method" => "turn/completed", "params" => params} ->
+        completed_turn = params["turn"] || %{}
+
+        if params["threadId"] == thread_id and turn_matches?(completed_turn, turn_id) do
+          case turn_error(completed_turn) do
+            nil -> {events, completed_turn}
+            reason -> throw({:app_server_error, reason, events})
+          end
+        else
+          wait_for_turn_completed(port, thread_id, turn_id, events, opts)
+        end
+
+      %{"method" => "error", "params" => params} ->
+        throw(
+          {:app_server_error, params["message"] || "Codex App Server reported an error.", events}
+        )
+
+      _ ->
+        wait_for_turn_completed(port, thread_id, turn_id, events, opts)
+    end
+  end
+
+  defp receive_message(port, events, opts) do
+    receive do
+      {^port, {:data, data}} ->
+        data
+        |> data_lines()
+        |> Enum.reduce({nil, events}, fn line, {_message, acc_events} ->
+          message = JSON.decode!(line)
+          {message, append_event(acc_events, message)}
+        end)
+        |> case do
+          {nil, acc_events} -> receive_message(port, acc_events, opts)
+          {message, acc_events} -> {message, acc_events}
+        end
+
+      {^port, {:exit_status, status}} ->
+        throw(
+          {:app_server_error, "Codex App Server process exited with status #{status}.", events}
+        )
+    after
+      timeout_ms(opts) ->
+        throw(
+          {:app_server_error, "Codex App Server did not complete before the run timed out.",
+           events}
+        )
+    end
+  rescue
+    error -> throw({:app_server_error, Exception.message(error), events})
+  end
+
+  defp append_event(events, message) do
+    event =
+      %{
+        "received_at" => now(),
+        "method" => message["method"],
+        "id" => message["id"],
+        "params" => message["params"],
+        "result" => message["result"],
+        "error" => message["error"]
+      }
+      |> reject_nil()
+
+    events ++ [event]
+  end
+
+  defp send_request(port, id, method, params) do
+    Port.command(
+      port,
+      JSON.encode!(%{"id" => id, "method" => method, "params" => params}) <> "\n"
+    )
+  end
+
+  defp open_port(opts) do
+    {command, args} = app_server_command(opts)
+
+    Port.open({:spawn_executable, command}, [
+      :binary,
+      :exit_status,
+      :use_stdio,
+      {:args, args},
+      {:line, 65_536}
+    ])
+  end
+
+  defp app_server_command(opts) do
+    cond do
+      command = Keyword.get(opts, :command) ->
+        {command, Keyword.get(opts, :args, [])}
+
+      command = System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND") ->
+        {command, split_args(System.get_env("SYMPHONIA_CODEX_APP_SERVER_ARGS") || "")}
+
+      true ->
+        {codex_bin!(opts), ["app-server", "proxy"]}
+    end
+  end
+
+  defp split_args(""), do: []
+  defp split_args(value), do: String.split(value, " ", trim: true)
+
+  defp codex_bin!(opts) do
+    configured =
+      Keyword.get(opts, :codex_bin) ||
+        System.get_env("SYMPHONIA_CODEX_BIN") ||
+        System.get_env("SYMPHONIA_CODEX_APP_SERVER_BIN") ||
+        "codex"
+
+    cond do
+      Path.type(configured) == :absolute and File.exists?(configured) ->
+        configured
+
+      executable = System.find_executable(configured) ->
+        executable
+
+      true ->
+        raise ArgumentError,
+              "The Coding Assistant can't start because Codex is not available on this computer."
+    end
+  end
+
+  defp schema_root do
+    Path.expand(Path.join([__DIR__, "..", "..", "..", "priv", "codex_app_server_schema"]))
+  end
+
+  defp turn_matches?(turn, turn_id) do
+    turn["id"] == turn_id or turn["turnId"] == turn_id
+  end
+
+  defp turn_error(turn) do
+    cond do
+      is_binary(turn["error"]) and String.trim(turn["error"]) != "" ->
+        turn["error"]
+
+      is_map(turn["error"]) ->
+        JSON.encode!(turn["error"])
+
+      turn["status"] in ["failed", "interrupted", "canceled"] ->
+        "Codex App Server turn ended with status #{turn["status"]}."
+
+      true ->
+        nil
+    end
+  end
+
+  defp last_message(events) do
+    events
+    |> Enum.reverse()
+    |> Enum.find_value(fn event ->
+      params = event["params"] || %{}
+      text = params["text"] || params["message"] || delta_text(params["delta"])
+
+      if is_binary(text) and String.trim(text) != "" do
+        String.trim(text)
+      end
+    end)
+    |> case do
+      nil -> ""
+      value -> value
+    end
+  end
+
+  defp delta_text(%{"text" => text}), do: text
+  defp delta_text(text) when is_binary(text), do: text
+  defp delta_text(_delta), do: nil
+
+  defp jsonrpc_error(error) do
+    error["message"] || JSON.encode!(error)
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp configured_model do
+    case System.get_env("SYMPHONIA_CODEX_MODEL") do
+      value when is_binary(value) and value != "" -> value
+      _ -> nil
+    end
+  end
+
+  defp timeout_ms(opts) do
+    case Keyword.get(opts, :timeout_ms) || System.get_env("SYMPHONIA_CODEX_TIMEOUT_MS") do
+      value when is_integer(value) and value > 0 ->
+        value
+
+      value when is_binary(value) ->
+        case Integer.parse(value) do
+          {int, ""} when int > 0 -> int
+          _ -> @default_timeout_ms
+        end
+
+      _ ->
+        @default_timeout_ms
+    end
+  end
+
+  defp next_request_id, do: System.unique_integer([:positive])
+  defp data_lines({:eol, line}), do: [to_string(line)]
+  defp data_lines({:noeol, ""}), do: []
+  defp data_lines({:noeol, line}), do: [to_string(line)]
+  defp data_lines(data), do: data |> to_string() |> String.split("\n", trim: true)
+  defp reject_nil(map), do: map |> Enum.reject(fn {_key, value} -> is_nil(value) end) |> Map.new()
+  defp truthy?(true), do: true
+  defp truthy?("true"), do: true
+  defp truthy?(_), do: false
+  defp blank?(value), do: is_nil(value) or (is_binary(value) and String.trim(value) == "")
+  defp now, do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+  defp clean_output(output) do
+    output
+    |> to_string()
+    |> String.trim()
+    |> case do
+      "" -> "Codex App Server daemon could not start."
+      message -> message
+    end
+  end
+
+  defp close_port(port) do
+    Port.close(port)
+  rescue
+    _ -> :ok
+  end
+end

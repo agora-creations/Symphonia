@@ -7,6 +7,7 @@ defmodule SymphoniaService.CodingAssistant do
 
   alias SymphoniaService.CodingAssistant.{
     Cancellation,
+    AppServerProvider,
     CodexProvider,
     LocalDemoProvider,
     RunEvents,
@@ -29,7 +30,8 @@ defmodule SymphoniaService.CodingAssistant do
         "provider" => provider_id(provider),
         "repository" => repository["key"],
         "task" => task_key,
-        "kind" => "assignment"
+        "kind" => "assignment",
+        "codex_thread_id" => previous_codex_thread_id(task)
       })
 
     TaskStore.apply_event(repository, task_key, "start")
@@ -43,6 +45,39 @@ defmodule SymphoniaService.CodingAssistant do
         "provider" => provider,
         "params" => params,
         "kind" => "assignment",
+        "run" => run
+      })
+
+    %{"run" => RunStore.public(run), "task" => task}
+  end
+
+  def start_harness_run(registry_path, repository, task_key, params \\ %{}) do
+    task = get_task!(repository, task_key)
+    ensure_assignable!(task)
+
+    provider = AppServerProvider
+
+    run =
+      RunStore.create(%{
+        "provider" => provider_id(provider),
+        "repository" => repository["key"],
+        "task" => task_key,
+        "kind" => "daemon_assignment",
+        "eligibility_reason" => Map.get(params, "eligibility_reason"),
+        "codex_thread_id" => previous_codex_thread_id(task)
+      })
+
+    TaskStore.apply_event(repository, task_key, "start")
+    task = put_task_run(repository, task_key, run)
+
+    {:ok, _pid} =
+      RunSupervisor.start_run(%{
+        "registry_path" => registry_path,
+        "repository" => repository,
+        "task_key" => task_key,
+        "provider" => provider,
+        "params" => params,
+        "kind" => "daemon_assignment",
         "run" => run
       })
 
@@ -76,7 +111,8 @@ defmodule SymphoniaService.CodingAssistant do
         "input" => assistant_input,
         "review_note_id" => review_note["id"],
         "attempt" => 1,
-        "max_attempts" => @continuation_max_attempts
+        "max_attempts" => @continuation_max_attempts,
+        "codex_thread_id" => previous_codex_thread_id(task)
       })
 
     task = put_task_run(repository, task_key, run)
@@ -107,6 +143,20 @@ defmodule SymphoniaService.CodingAssistant do
       run ->
         if run["repository"] == repository["key"] and run["task"] == task_key do
           RunStore.public(run)
+        else
+          raise ArgumentError, "Run #{run_id} does not belong to task #{task_key}."
+        end
+    end
+  end
+
+  def get_run_events(repository, task_key, run_id) do
+    case RunStore.get(run_id) do
+      nil ->
+        raise ArgumentError, "Run #{run_id} not found."
+
+      run ->
+        if run["repository"] == repository["key"] and run["task"] == task_key do
+          RunStore.public_events(run)
         else
           raise ArgumentError, "Run #{run_id} does not belong to task #{task_key}."
         end
@@ -194,6 +244,12 @@ defmodule SymphoniaService.CodingAssistant do
       "state" => run["state"],
       "current_step" => run["current_step"],
       "message" => RunEvents.public_message(run),
+      "workspace_path" => run["workspace_path"],
+      "codex_thread_id" => run["codex_thread_id"],
+      "turn_id" => run["turn_id"],
+      "eligibility_reason" => run["eligibility_reason"],
+      "review_branch" => run["review_branch"],
+      "curated_summary_path" => run["curated_summary_path"],
       "started_at" => run["started_at"],
       "completed_at" => run["completed_at"]
     }
@@ -208,7 +264,9 @@ defmodule SymphoniaService.CodingAssistant do
 
   defp provider_from_env("local_demo"), do: LocalDemoProvider
   defp provider_from_env("demo"), do: LocalDemoProvider
-  defp provider_from_env(_value), do: CodexProvider
+  defp provider_from_env("codex"), do: CodexProvider
+  defp provider_from_env("codex_exec"), do: CodexProvider
+  defp provider_from_env(_value), do: AppServerProvider
 
   defp provider_id(provider) do
     if Code.ensure_loaded?(provider) and function_exported?(provider, :id, 0) do
@@ -216,5 +274,11 @@ defmodule SymphoniaService.CodingAssistant do
     else
       "coding_assistant"
     end
+  end
+
+  defp previous_codex_thread_id(task) do
+    get_in(task, [:frontmatter, "run", "codex_thread_id"]) ||
+      get_in(task, ["run", "codexThreadId"]) ||
+      get_in(task, ["run", "codex_thread_id"])
   end
 end

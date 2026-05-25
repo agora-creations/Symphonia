@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3010",
     "build": "next build",
+    "test:harness-ui": "node --test scripts/harness-ui-model.test.mjs",
     "start": "next start",
     "lint": "next lint"
   },

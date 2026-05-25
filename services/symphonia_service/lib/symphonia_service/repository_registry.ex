@@ -393,7 +393,11 @@ defmodule SymphoniaService.RepositoryRegistry do
       github when is_map(github) -> Map.put(normalized, "github", github)
       _ -> normalized
     end
+    |> maybe_put_map("automation", repository["automation"])
   end
+
+  defp maybe_put_map(map, key, value) when is_map(value), do: Map.put(map, key, value)
+  defp maybe_put_map(map, _key, _value), do: map
 
   defp normalize_key(value) when is_binary(value) do
     value

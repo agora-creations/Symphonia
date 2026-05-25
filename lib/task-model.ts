@@ -55,11 +55,26 @@ export interface GitHubTaskMetadata {
 export interface CodingAssistantRun {
   id: string;
   state: "queued" | "running" | "completed" | "failed" | "canceled" | string;
+  provider?: string;
   label?: string;
   currentStep?: string;
   message?: string;
+  workspacePath?: string;
+  codexThreadId?: string;
+  turnId?: string;
+  eligibilityReason?: string;
+  reviewBranch?: string;
+  curatedSummaryPath?: string;
+  timeline?: CodingAssistantRunEvent[];
   startedAt?: string;
   completedAt?: string;
+}
+
+export interface CodingAssistantRunEvent {
+  at?: string;
+  label?: string;
+  threadId?: string;
+  turnId?: string;
 }
 
 export interface CodingAssistantHandoff {
@@ -68,6 +83,20 @@ export interface CodingAssistantHandoff {
   nextReviewAction?: string;
   headBranch?: string;
   baseBranch?: string;
+  curatedSummaryPath?: string;
+}
+
+export interface TaskEligibilityCheck {
+  ok: boolean;
+  code: string;
+  message: string;
+}
+
+export interface TaskEligibilityExplanation {
+  eligible: boolean;
+  code: string;
+  reason: string;
+  checks: TaskEligibilityCheck[];
 }
 
 export interface ReviewNote {

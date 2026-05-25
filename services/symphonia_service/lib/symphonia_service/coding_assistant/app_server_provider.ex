@@ -1,0 +1,245 @@
+defmodule SymphoniaService.CodingAssistant.AppServerProvider do
+  @moduledoc """
+  Coding Assistant provider backed by Codex App Server.
+  """
+
+  @behaviour SymphoniaService.CodingAssistant.Provider
+
+  alias SymphoniaService.CodingAssistant.{
+    AppServerClient,
+    BranchManager,
+    ChangeDetector,
+    CuratedSummary,
+    HandoffBuilder,
+    RunStore
+  }
+
+  @impl true
+  def id, do: "codex_app_server"
+
+  @impl true
+  def preflight(repository, task, _params) do
+    with :ok <- AppServerClient.ensure_schema_bundle!(),
+         :ok <- branch_preflight(repository, task) do
+      :ok
+    end
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  @impl true
+  def run(repository, task, run, params) do
+    if force_failure?(params) do
+      {:error, "The Coding Assistant could not produce a reviewable handoff."}
+    else
+      with :ok <- AppServerClient.ensure_schema_bundle!(),
+           :ok <- branch_preflight(repository, task) do
+        BranchManager.with_persistent_task_branch_worktree(repository, task, fn context ->
+          RunStore.update_metadata(run, %{
+            "workspace_path" => context.repo_path,
+            "review_branch" => context.head_branch
+          })
+
+          RunStore.mark_step(run, "Preparing Codex App Server thread")
+          prompt = build_prompt(repository, task, context, params)
+
+          with {:ok, output} <- invoke_app_server(run, context.repo_path, prompt),
+               {:ok, changes} <- detect_and_clean_changes(run, context.repo_path),
+               :ok <- ensure_committable_changes(changes),
+               {:ok, summary_path} <- write_summary(run, context.repo_path, task, changes, output),
+               :ok <- commit_and_push(run, context, task, changes, summary_path) do
+            files_changed = Enum.sort(changes["committable"] ++ [summary_path])
+
+            handoff =
+              HandoffBuilder.build_from_changes(
+                task,
+                context,
+                files_changed,
+                output["last_message"]
+              )
+              |> Map.put("curated_summary_path", summary_path)
+
+            {:ok, handoff}
+          else
+            {:error, reason} -> {:error, reason}
+          end
+        end)
+      end
+    end
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  defp branch_preflight(repository, task) do
+    BranchManager.ensure_repo_ready_for_task_branch!(repository, task)
+    :ok
+  end
+
+  defp invoke_app_server(run, repo_path, prompt) do
+    opts = [
+      thread_id: run["codex_thread_id"],
+      command: System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND"),
+      args: app_server_args()
+    ]
+
+    case AppServerClient.run_turn(repo_path, prompt, opts) do
+      {:ok, output} ->
+        RunStore.update_metadata(run, %{
+          "codex_thread_id" => output["thread_id"],
+          "turn_id" => output["turn_id"]
+        })
+
+        RunStore.record_provider_output(run, %{
+          "app_server_events" => output["events"],
+          "turn" => output["turn"]
+        })
+
+        RunStore.append_timeline(run, %{
+          "label" => "Codex App Server turn completed",
+          "thread_id" => output["thread_id"],
+          "turn_id" => output["turn_id"]
+        })
+
+        {:ok, output}
+
+      {:error, reason, events} ->
+        RunStore.record_provider_output(run, %{"app_server_events" => events})
+        {:error, reason}
+    end
+  end
+
+  defp detect_and_clean_changes(run, repo_path) do
+    RunStore.mark_step(run, "Detecting changed files")
+    changes = ChangeDetector.detect!(repo_path)
+    RunStore.record_provider_output(run, %{"change_detection" => changes})
+    BranchManager.revert_paths!(repo_path, changes["excluded"])
+    {:ok, changes}
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  defp ensure_committable_changes(%{"committable" => []}) do
+    {:error, "The Coding Assistant did not produce any files that can be reviewed."}
+  end
+
+  defp ensure_committable_changes(_changes), do: :ok
+
+  defp write_summary(run, repo_path, task, changes, output) do
+    summary_path =
+      CuratedSummary.write!(
+        repo_path,
+        task,
+        RunStore.get(run["id"]) || run,
+        changes["committable"],
+        output["last_message"]
+      )
+
+    RunStore.update_metadata(run, %{"curated_summary_path" => summary_path})
+    {:ok, summary_path}
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  defp commit_and_push(run, context, task, changes, summary_path) do
+    RunStore.mark_step(run, "Creating review branch")
+
+    BranchManager.commit_files!(
+      context,
+      task,
+      Enum.sort(changes["committable"] ++ [summary_path])
+    )
+
+    BranchManager.push_task_branch!(context)
+    :ok
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  defp build_prompt(repository, task, context, params) do
+    assistant_input = Map.get(params, "assistant_input")
+    workflow = read_workflow(context.repo_path)
+
+    """
+    You are the Coding Assistant working inside a Symphonía persistent task workspace.
+
+    Task key: #{task["key"]}
+    Task title: #{task["title"]}
+    Repository: #{repository["name"] || repository["key"]}
+    Base branch: #{context.base_branch}
+    Head branch: #{context.head_branch}
+    Workspace path: #{context.repo_path}
+
+    Task brief:
+    #{task_brief(task, assistant_input)}
+
+    #{continuation_block(assistant_input)}
+    Review expectations:
+    #{review_expectations(task)}
+
+    WORKFLOW.md:
+    #{workflow}
+
+    Rules:
+    - Make the code changes needed for the task in this workspace.
+    - Do not commit, push, or open a pull request; Symphonía will commit and push selected work-product files.
+    - Do not edit symphonia/tasks, symphonia/run-summaries, WORKFLOW.md, .symphonia, or registry files.
+    - Finish with a concise summary of what changed and any validation you performed.
+    """
+    |> String.trim()
+    |> Kernel.<>("\n")
+  end
+
+  defp continuation_block(value) when is_binary(value) do
+    value = String.trim(value)
+    if value == "", do: "", else: "Continuation input:\n#{value}\n"
+  end
+
+  defp continuation_block(_value), do: ""
+
+  defp task_brief(task, assistant_input) when is_binary(assistant_input) do
+    task
+    |> Map.get("body", "")
+    |> strip_review_history()
+    |> String.trim()
+  end
+
+  defp task_brief(task, _assistant_input), do: String.trim(task["body"] || "")
+
+  defp strip_review_history(body) do
+    body
+    |> String.split(~r/\n## (Review notes|Handoff history)\b/, parts: 2)
+    |> List.first()
+    |> to_string()
+  end
+
+  defp review_expectations(task) do
+    task
+    |> Map.get("reviewExpectations", [])
+    |> List.wrap()
+    |> Enum.reject(&blank?/1)
+    |> case do
+      [] -> "- Review the changed files against the task acceptance criteria."
+      values -> Enum.map_join(values, "\n", &"- #{&1}")
+    end
+  end
+
+  defp read_workflow(repo_path) do
+    case File.read(Path.join(repo_path, "WORKFLOW.md")) do
+      {:ok, body} -> String.trim(body)
+      {:error, _reason} -> "No WORKFLOW.md found."
+    end
+  end
+
+  defp app_server_args do
+    case System.get_env("SYMPHONIA_CODEX_APP_SERVER_ARGS") do
+      value when is_binary(value) and value != "" -> String.split(value, " ", trim: true)
+      _ -> []
+    end
+  end
+
+  defp force_failure?(params) do
+    Map.get(params, "forceFailure") == true or Map.get(params, "force_failure") == true
+  end
+
+  defp blank?(value), do: is_nil(value) or (is_binary(value) and String.trim(value) == "")
+end
