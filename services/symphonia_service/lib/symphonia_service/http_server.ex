@@ -5,7 +5,14 @@ defmodule SymphoniaService.HTTPServer do
 
   use GenServer
 
-  alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore, Workspace}
+  alias SymphoniaService.{
+    CodingAssistant,
+    RepositoryRegistry,
+    SpecWorkspace,
+    TaskStore,
+    Workspace
+  }
+
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
 
   def start_link(opts) do
@@ -94,6 +101,44 @@ defmodule SymphoniaService.HTTPServer do
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "workspace" => Workspace.state(repository)}}
 
+      ["api", "repositories", repo, "spec-workspace"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        {200,
+         %{"repo" => repository["key"], "specWorkspace" => spec_workspace_payload(repository)}}
+
+      ["api", "repositories", repo, "spec-workspace", "artifacts"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        params = query_params(path)
+
+        case Map.get(params, "type") do
+          nil ->
+            {200,
+             %{"artifacts" => public_spec_artifacts(SpecWorkspace.list_artifacts(repository))}}
+
+          type ->
+            artifacts =
+              repository
+              |> SpecWorkspace.list_artifacts(type)
+              |> Enum.map(&public_spec_artifact/1)
+
+            {200, %{"type" => type, "artifacts" => artifacts}}
+        end
+
+      ["api", "repositories", repo, "spec-workspace", "artifacts", type] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        artifacts =
+          repository
+          |> SpecWorkspace.list_artifacts(type)
+          |> Enum.map(&public_spec_artifact/1)
+
+        {200, %{"type" => type, "artifacts" => artifacts}}
+
+      ["api", "repositories", repo, "spec-workspace", "artifacts", type, id] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, %{"artifact" => SpecWorkspace.read_artifact(repository, type, id)}}
+
       ["api", "github", "installations", "callback"] ->
         github = Repositories.complete_installation(query_params(path))
         {200, %{"connection" => Auth.connection(), "github" => github}}
@@ -137,6 +182,11 @@ defmodule SymphoniaService.HTTPServer do
         payload = decode_json(body)
         workflow = Workspace.update_workflow(repository, Map.get(payload, "body", ""))
         {200, %{"repo" => repository["key"], "workflow" => workflow}}
+
+      ["api", "repositories", repo, "spec-workspace", "artifacts", type, id] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        artifact = SpecWorkspace.update_artifact(repository, type, id, decode_json(body))
+        {200, %{"artifact" => artifact}}
 
       ["api", "repositories", repo, "tasks", task_key] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -216,6 +266,23 @@ defmodule SymphoniaService.HTTPServer do
         repository = RepositoryRegistry.get!(registry_path, repo)
         workspace = Workspace.initialize(repository)
         {200, %{"repo" => repository["key"], "workspace" => workspace}}
+
+      ["api", "repositories", repo, "spec-workspace", "initialize"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        SpecWorkspace.initialize(repository)
+
+        {200,
+         %{"repo" => repository["key"], "specWorkspace" => spec_workspace_payload(repository)}}
+
+      ["api", "repositories", repo, "spec-workspace", "milestones"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        artifact = SpecWorkspace.create_milestone(repository, decode_json(body))
+        {201, %{"artifact" => artifact}}
+
+      ["api", "repositories", repo, "spec-workspace", "decisions"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        artifact = SpecWorkspace.create_decision(repository, decode_json(body))
+        {201, %{"artifact" => artifact}}
 
       ["api", "repositories", repo, "github", "link"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -364,6 +431,23 @@ defmodule SymphoniaService.HTTPServer do
 
     :ok
   end
+
+  defp spec_workspace_payload(repository) do
+    %{
+      "state" => SpecWorkspace.state(repository),
+      "sections" => SpecWorkspace.sections(repository)
+    }
+  end
+
+  defp public_spec_artifacts(artifacts_by_type) do
+    artifacts_by_type
+    |> Enum.map(fn {type, artifacts} ->
+      {type, Enum.map(artifacts, &public_spec_artifact/1)}
+    end)
+    |> Map.new()
+  end
+
+  defp public_spec_artifact(artifact), do: Map.drop(artifact, ["body"])
 
   defp public_repository(repository) do
     workspace = Workspace.state(repository)

@@ -1,6 +1,6 @@
 defmodule SymphoniaService.Markdown do
   @moduledoc """
-  Small YAML-frontmatter parser/serializer for the task schema.
+  Small YAML-frontmatter parser/serializer for task and spec artifact schemas.
 
   It supports the subset used by Symphonia task files:
 
@@ -13,6 +13,8 @@ defmodule SymphoniaService.Markdown do
   """
 
   @ordered_keys [
+    "type",
+    "id",
     "key",
     "title",
     "status",
@@ -36,7 +38,9 @@ defmodule SymphoniaService.Markdown do
     "review_summary",
     "files_changed",
     "next_review_action",
-    "updated_at"
+    "created_at",
+    "updated_at",
+    "source"
   ]
 
   def parse(text) when is_binary(text) do

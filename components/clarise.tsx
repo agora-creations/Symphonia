@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
 import { Sparkles, Send, X, FilePlus2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CATEGORY_SINGULAR, type DocCategory } from "@/lib/docs-store";
@@ -20,7 +21,12 @@ interface Message {
   role: "user" | "clarise";
   content: string;
   /** If set, this message can be saved as a new draft of the given category. */
-  saveable?: { category: DocCategory; suggestedTitle: string };
+  saveable?:
+    | { category: DocCategory; suggestedTitle: string }
+    | {
+        specAction: "starter_codebase_map" | "starter_milestone" | "decision_record";
+        suggestedTitle: string;
+      };
 }
 
 const SUGGESTIONS = [
@@ -77,7 +83,7 @@ export function Clarise({ repoKey }: { repoKey: string }) {
     {
       id: "m0",
       role: "clarise",
-      content: `Hi — I'm Clarise. I can help draft Tasks, Docs, Decisions, Reviews, Run Summaries, or WORKFLOW.md for ${repoKey}. Anything I draft goes into the workspace editor as an editable draft so you can review before saving.`,
+      content: `Hi — I'm Clarise. I can help draft starter codebase maps, milestones, decisions, requirements, plans, tasks, reviews, run summaries, or WORKFLOW.md for ${repoKey}.`,
     },
   ]);
   const [draft, setDraft] = useState("");
@@ -86,6 +92,7 @@ export function Clarise({ repoKey }: { repoKey: string }) {
   const { startDraft } = useDraftHost();
   const newTask = useNewTask();
   const { openSignal } = useContext(SignalCtx);
+  const router = useRouter();
 
   // Open when the command palette pings.
   useEffect(() => {
@@ -112,11 +119,35 @@ export function Clarise({ repoKey }: { repoKey: string }) {
     }, 350);
   };
 
-  const handleSaveAsDraft = (
+  const handleSaveAsDraft = async (
     msg: Message,
     overrideCategory?: DocCategory,
   ) => {
     if (!msg.saveable) return;
+    if ("specAction" in msg.saveable && !overrideCategory) {
+      try {
+        const artifact = await createSpecArtifact(repoKey, msg.saveable.specAction, msg.saveable.suggestedTitle);
+        window.dispatchEvent(new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }));
+        router.push(
+          `/r/${repoKey.toLowerCase()}/workspace/${encodeURIComponent(
+            artifact.type,
+          )}/${encodeURIComponent(artifact.id)}`,
+        );
+        setOpen(false);
+      } catch (err) {
+        setMessages((m) => [
+          ...m,
+          {
+            id: `e${Date.now()}`,
+            role: "clarise",
+            content: err instanceof Error ? err.message : "Could not create workspace file.",
+          },
+        ]);
+      }
+      return;
+    }
+
+    if (!("category" in msg.saveable)) return;
     const category = overrideCategory ?? msg.saveable.category;
     if (category === "task") {
       newTask.open({
@@ -184,20 +215,31 @@ export function Clarise({ repoKey }: { repoKey: string }) {
             </div>
             {m.role === "clarise" && m.saveable && (
               <div className="flex flex-wrap items-center gap-1.5 pl-1">
-                <span className="text-[11px] text-muted-foreground">Save as:</span>
-                <DraftPill onClick={() => handleSaveAsDraft(m)}>
-                  {CATEGORY_SINGULAR[m.saveable.category]}
-                </DraftPill>
-                {m.saveable.category !== "doc" && (
-                  <DraftPill onClick={() => handleSaveAsDraft(m, "doc")}>Doc</DraftPill>
-                )}
-                {m.saveable.category !== "decision" && (
-                  <DraftPill onClick={() => handleSaveAsDraft(m, "decision")}>
-                    Decision
-                  </DraftPill>
+                {"category" in m.saveable ? (
+                  <>
+                    <span className="text-[11px] text-muted-foreground">Save as:</span>
+                    <DraftPill onClick={() => void handleSaveAsDraft(m)}>
+                      {CATEGORY_SINGULAR[m.saveable.category]}
+                    </DraftPill>
+                    {m.saveable.category !== "doc" && (
+                      <DraftPill onClick={() => void handleSaveAsDraft(m, "doc")}>Doc</DraftPill>
+                    )}
+                    {m.saveable.category !== "decision" && (
+                      <DraftPill onClick={() => void handleSaveAsDraft(m, "decision")}>
+                        Decision
+                      </DraftPill>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="text-[11px] text-muted-foreground">Workspace:</span>
+                    <DraftPill onClick={() => void handleSaveAsDraft(m)}>
+                      {specActionLabel(m.saveable.specAction)}
+                    </DraftPill>
+                  </>
                 )}
                 <span className="text-[10px] text-muted-foreground/70">
-                  Opens an editable draft
+                  Opens an editable file
                 </span>
               </div>
             )}
@@ -272,9 +314,56 @@ function DraftPill({
   );
 }
 
+async function createSpecArtifact(
+  repoKey: string,
+  action: "starter_codebase_map" | "starter_milestone" | "decision_record",
+  title: string,
+): Promise<{ type: string; id: string }> {
+  if (action === "starter_codebase_map") {
+    const res = await fetch(
+      `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/initialize`,
+      { method: "POST" },
+    );
+    const payload = (await res.json()) as { error?: string };
+    if (!res.ok) throw new Error(payload.error ?? "Could not create codebase map.");
+    return { type: "codebase_map", id: "codebase-map" };
+  }
+
+  const endpoint = action === "starter_milestone" ? "milestones" : "decisions";
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/${endpoint}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    },
+  );
+  const payload = (await res.json()) as {
+    artifact?: { type: string; id: string };
+    error?: string;
+  };
+  if (!res.ok || !payload.artifact) {
+    throw new Error(payload.error ?? "Could not create workspace file.");
+  }
+  return payload.artifact;
+}
+
+function specActionLabel(
+  action: "starter_codebase_map" | "starter_milestone" | "decision_record",
+) {
+  switch (action) {
+    case "starter_codebase_map":
+      return "Open codebase map";
+    case "starter_milestone":
+      return "Create milestone";
+    case "decision_record":
+      return "Create decision";
+  }
+}
+
 /**
- * Mock Clarise responder. The point is to show the save-as-draft handoff;
- * everything is local. Chat is never silently persisted.
+ * Mock Clarise responder. The point is to show deterministic starter actions;
+ * chat is never silently persisted.
  */
 function respond(prompt: string, repo: string): Pick<Message, "content" | "saveable"> {
   const p = prompt.toLowerCase();
@@ -288,6 +377,42 @@ function respond(prompt: string, repo: string): Pick<Message, "content" | "savea
         "on_review_approved:\n  - open_pr: true\n\n" +
         "on_pr_merged:\n  - status: completed\n",
       saveable: { category: "workflow", suggestedTitle: "WORKFLOW.md" },
+    };
+  }
+
+  if (p.includes("codebase map") || p.includes("map the codebase")) {
+    return {
+      content:
+        "# Codebase Map\n\n## Purpose\n\n## Entry points\n\n## Important paths\n\n## Data and state\n\n## Open questions\n",
+      saveable: {
+        specAction: "starter_codebase_map",
+        suggestedTitle: "Codebase map",
+      },
+    };
+  }
+
+  if (p.includes("milestone")) {
+    return {
+      content:
+        "# Milestone 001 — Untitled\n\n## Goal\n\n## Why this matters\n\n## Scope\n\n## Non-goals\n\n## Acceptance criteria\n\n## Open questions\n\n## Related artifacts\n",
+      saveable: {
+        specAction: "starter_milestone",
+        suggestedTitle: "Untitled milestone",
+      },
+    };
+  }
+
+  if (p.includes("requirements")) {
+    return {
+      content:
+        "# Requirements 001 — Untitled requirements\n\n## User needs\n\n## Functional requirements\n\n## Constraints\n\n## Acceptance criteria\n",
+    };
+  }
+
+  if (p.includes("plan")) {
+    return {
+      content:
+        "# Plan 001 — Untitled plan\n\n## Objective\n\n## Steps\n\n## Validation\n\n## Risks\n\n## Related milestone\n",
     };
   }
 
@@ -316,7 +441,7 @@ function respond(prompt: string, repo: string): Pick<Message, "content" | "savea
         "## Why\n\nMarkdown diffs cleanly in PRs and survives tool changes.\n\n" +
         "## Consequences\n\n- Workspace memory lives next to code.\n- We cannot rely on database-only state.\n",
       saveable: {
-        category: "decision",
+        specAction: "decision_record",
         suggestedTitle: "Markdown is the source of truth",
       },
     };
@@ -352,6 +477,6 @@ function respond(prompt: string, repo: string): Pick<Message, "content" | "savea
     content:
       "Got it. I'll keep this scoped to " +
       repo +
-      " so I don't pull in unrelated context. If you want a durable page, I can hand off any answer to the workspace editor — just ask me to draft a Task, Doc, Decision, Review, Run Summary, or WORKFLOW.md.",
+      " so I don't pull in unrelated context. Ask me for a starter codebase map, milestone, decision, requirements, plan, or task.",
   };
 }

@@ -7,6 +7,65 @@ export interface WorkspaceState {
   };
 }
 
+export type SpecArtifactType =
+  | "codebase_map"
+  | "codebase_conventions"
+  | "codebase_architecture"
+  | "milestone"
+  | "discussion"
+  | "requirements"
+  | "plan"
+  | "decision";
+
+export type SpecArtifactStatus =
+  | "draft"
+  | "in_discussion"
+  | "ready_for_approval"
+  | "approved"
+  | "archived";
+
+export interface SpecWorkspaceState {
+  exists: boolean;
+  initialized: boolean;
+  missingDirectories: string[];
+  missingDefaultArtifacts: SpecArtifactType[];
+  statuses: SpecArtifactStatus[];
+}
+
+export interface SpecArtifact {
+  type: SpecArtifactType;
+  id: string;
+  title: string;
+  status: SpecArtifactStatus;
+  source?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  path: string;
+  metadata: Record<string, unknown> & {
+    type: SpecArtifactType;
+    id: string;
+    title?: string;
+    status?: SpecArtifactStatus;
+    created_at?: string;
+    updated_at?: string;
+    source?: string;
+  };
+  body: string;
+}
+
+export type SpecArtifactSummary = Omit<SpecArtifact, "body">;
+
+export interface SpecWorkspaceSection {
+  label: string;
+  types: SpecArtifactType[];
+  artifacts: SpecArtifactSummary[];
+}
+
+export interface SpecWorkspacePayload {
+  state: SpecWorkspaceState;
+  sections: SpecWorkspaceSection[];
+}
+
 export interface RepositorySummary {
   key: string;
   name: string;
