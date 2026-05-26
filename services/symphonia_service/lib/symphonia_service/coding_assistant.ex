@@ -197,6 +197,7 @@ defmodule SymphoniaService.CodingAssistant do
 
   defp ensure_assignable!(%{"status" => "todo"}), do: :ok
   defp ensure_assignable!(%{"status" => "paused", "pausedReason" => "run_failed"}), do: :ok
+  defp ensure_assignable!(%{"status" => "paused", "pausedReason" => "blocked_by_setup"}), do: :ok
   defp ensure_assignable!(%{"status" => "paused", "pausedReason" => "waiting_for_user"}), do: :ok
 
   defp ensure_assignable!(_task) do
@@ -244,6 +245,8 @@ defmodule SymphoniaService.CodingAssistant do
       "state" => run["state"],
       "current_step" => run["current_step"],
       "message" => RunEvents.public_message(run),
+      "display_step" => RunEvents.display_step(run),
+      "display_message" => RunEvents.display_message(run),
       "workspace_path" => run["workspace_path"],
       "codex_thread_id" => run["codex_thread_id"],
       "turn_id" => run["turn_id"],

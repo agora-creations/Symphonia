@@ -27,6 +27,7 @@ const {
   harnessLabel,
   harnessStatusForTask,
   reviewHandoffForTask,
+  runDisplayForTask,
   runTimelineForTask,
 } = require(compiledPath);
 
@@ -97,6 +98,23 @@ test("blocked, in-review, polling, timeline, and handoff displays are derived wi
   assert.deepEqual(
     harnessStatusForTask(
       task({
+        status: "paused",
+        pausedReason: "blocked_by_setup",
+        pausedExplanation:
+          "Codex is not ready on this machine. Symphonia could not find the managed Codex standalone binary needed to start Codex App Server. Install or repair Codex locally, then retry. No changes were made.",
+      }),
+    ),
+    {
+      label: "Blocked",
+      reason:
+        "Codex is not ready on this machine. Symphonia could not find the managed Codex standalone binary needed to start Codex App Server. Install or repair Codex locally, then retry. No changes were made.",
+      tone: "warning",
+    },
+  );
+
+  assert.deepEqual(
+    harnessStatusForTask(
+      task({
         status: "in_review",
         handoff: { summary: "Ready", filesChanged: [], headBranch: "symphonia/task/sym-1" },
       }),
@@ -108,11 +126,26 @@ test("blocked, in-review, polling, timeline, and handoff displays are derived wi
   assert.equal(activeRunPollingTarget(task({ run: { id: "run-1", state: "completed" } })), null);
 
   assert.deepEqual(
+    runDisplayForTask(
+      task({
+        run: {
+          id: "run-1",
+          state: "running",
+          currentStep: "Preparing Codex App Server thread",
+          displayStep: "Starting Codex",
+          displayMessage: "Codex is working from the task brief.",
+        },
+      }),
+    ),
+    { step: "Starting Codex", message: "Codex is working from the task brief." },
+  );
+
+  assert.deepEqual(
     runTimelineForTask(
       task({ run: { id: "run-1", state: "completed", timeline: [{ label: "Local event" }] } }),
       [{ label: "Fetched event", threadId: "thread-1", turnId: "turn-1" }],
     ),
-    [{ label: "Fetched event", threadId: "thread-1", turnId: "turn-1" }],
+    [{ label: "Fetched event" }],
   );
 
   assert.deepEqual(
@@ -121,12 +154,24 @@ test("blocked, in-review, polling, timeline, and handoff displays are derived wi
         status: "in_review",
         handoff: {
           summary: "Review this branch.",
-          filesChanged: ["app/file.ts", "symphonia/run-summaries/sym-1.md"],
+          filesChanged: [
+            "app/file.ts",
+            "symphonia/run-summaries/sym-1.md",
+            "/Users/example/workspace/app/secret.ts",
+          ],
           headBranch: "symphonia/task/sym-1",
           baseBranch: "main",
           curatedSummaryPath: "symphonia/run-summaries/sym-1.md",
           nextReviewAction: "Approve or request changes.",
+          validationEvidence: [
+            {
+              label: "Tests pass",
+              status: "not_run",
+              detail: "No machine validation evidence was recorded for this expectation.",
+            },
+          ],
         },
+        reviewExpectations: ["Tests pass"],
       }),
     ),
     {
@@ -135,6 +180,31 @@ test("blocked, in-review, polling, timeline, and handoff displays are derived wi
       nextReviewAction: "Approve or request changes.",
       branch: "symphonia/task/sym-1 -> main",
       curatedSummaryPath: "symphonia/run-summaries/sym-1.md",
+      validationEvidence: [
+        {
+          label: "Tests pass",
+          status: "not_run",
+          detail: "No machine validation evidence was recorded for this expectation.",
+        },
+      ],
+      proofNeeded: ["Tests pass"],
     },
   );
+});
+
+test("task page copy separates Clarise planning from Codex implementation and hides raw run details", async () => {
+  const taskPage = await readFile(new URL("../components/task-page.tsx", import.meta.url), "utf8");
+
+  assert.match(taskPage, /Ask Codex to work on this task/);
+  assert.match(taskPage, /Codex is working on this task/);
+  assert.match(taskPage, /Goal/);
+  assert.match(taskPage, /Context/);
+  assert.match(taskPage, /Proof needed/);
+  assert.match(taskPage, /Validation evidence/);
+  assert.match(taskPage, /Next action/);
+  assert.doesNotMatch(taskPage, /task\.run\.provider/);
+  assert.doesNotMatch(taskPage, /task\.run\.workspacePath/);
+  assert.doesNotMatch(taskPage, /task\.run\.codexThreadId/);
+  assert.doesNotMatch(taskPage, /event\.threadId/);
+  assert.doesNotMatch(taskPage, /event\.turnId/);
 });

@@ -200,12 +200,12 @@ export function CommandPaletteProvider({
         },
         {
           id: "nav-workflow",
-          label: "Automation Rules",
+          label: "Repository rules",
           hint: repoForActions,
           group: "Navigate",
           icon: <GitBranch className="h-3.5 w-3.5" />,
           run: () => router.push(`/r/${s}/workflow`),
-          keywords: "workflow",
+          keywords: "workflow rules repository",
         },
         {
           id: "create-task",

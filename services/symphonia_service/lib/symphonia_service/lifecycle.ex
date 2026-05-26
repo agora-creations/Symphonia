@@ -63,12 +63,16 @@ defmodule SymphoniaService.Lifecycle do
             Map.get(params, "explanation") ||
               "The Coding Assistant could not produce a reviewable handoff."
 
+          paused_reason =
+            (Map.get(params, "paused_reason") || Map.get(params, "pausedReason") || "run_failed")
+            |> valid_paused_reason()
+
           frontmatter =
             frontmatter
             |> put_common(now)
             |> Map.merge(%{
               "status" => "paused",
-              "paused_reason" => "run_failed",
+              "paused_reason" => paused_reason,
               "paused_explanation" => explanation
             })
 
@@ -91,26 +95,14 @@ defmodule SymphoniaService.Lifecycle do
           {frontmatter, body}
 
         "approve" ->
-          requires_pr = Map.get(params, "requires_pr", true)
-
           frontmatter =
             frontmatter
             |> put_common(now)
             |> Map.put("review_approved", true)
             |> Map.put("review_state", "approved")
-
-          frontmatter =
-            if requires_pr do
-              frontmatter
-              |> Map.put("status", "in_review")
-              |> Map.put("next_step", "open_pull_request")
-              |> Map.put("next_review_action", "Open pull request.")
-            else
-              frontmatter
-              |> Map.put("status", "completed")
-              |> Map.put("next_step", nil)
-              |> Map.put("next_review_action", nil)
-            end
+            |> Map.put("status", "in_review")
+            |> Map.put("next_step", "open_pull_request")
+            |> Map.put("next_review_action", "Open pull request.")
 
           {frontmatter, body}
 
@@ -184,6 +176,9 @@ defmodule SymphoniaService.Lifecycle do
     |> Map.put("updated_at", now)
     |> Map.put_new("files_changed", [])
   end
+
+  defp valid_paused_reason(reason) when reason in @valid_paused_reasons, do: reason
+  defp valid_paused_reason(_reason), do: "run_failed"
 
   defp maybe_close_github_issue(%{"github_sync_enabled" => true} = frontmatter) do
     Map.put(frontmatter, "github_issue_state", "closed")

@@ -83,7 +83,7 @@ export function Clarise({ repoKey }: { repoKey: string }) {
     {
       id: "m0",
       role: "clarise",
-      content: `Hi — I'm Clarise. I can help draft starter codebase maps, milestones, decisions, requirements, plans, tasks, reviews, run summaries, or automation rules for ${repoKey}.`,
+      content: `Hi — I'm Clarise. I can help draft starter codebase maps, milestones, decisions, requirements, plans, tasks, reviews, run summaries, or repository rules for ${repoKey}.`,
     },
   ]);
   const [draft, setDraft] = useState("");
@@ -371,12 +371,12 @@ function respond(prompt: string, repo: string): Pick<Message, "content" | "savea
   if (p.includes("workflow") || p.includes("workflow.md")) {
     return {
       content:
-        "# Automation rules\n# Review-first — humans review the run summary in Symphonía before any PR.\n\n" +
+        "# Repository rules\n# Review-first — humans review the run summary in Symphonía before any PR.\n\n" +
         "on_task_started:\n  - assign: claude\n  - require_review: true\n\n" +
         "on_run_complete:\n  - status: in_review\n  - request_review_from: assignees\n\n" +
         "on_review_approved:\n  - open_pr: true\n\n" +
         "on_pr_merged:\n  - status: completed\n",
-      saveable: { category: "workflow", suggestedTitle: "Automation rules" },
+      saveable: { category: "workflow", suggestedTitle: "Repository rules" },
     };
   }
 

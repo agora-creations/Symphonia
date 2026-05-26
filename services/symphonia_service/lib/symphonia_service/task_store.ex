@@ -395,6 +395,8 @@ defmodule SymphoniaService.TaskStore do
       "label" => RunEvents.label(run["state"]),
       "currentStep" => run["current_step"] || RunEvents.default_step(run["state"]),
       "message" => RunEvents.public_message(run),
+      "displayStep" => run["display_step"] || RunEvents.display_step(run),
+      "displayMessage" => run["display_message"] || RunEvents.display_message(run),
       "workspacePath" => run["workspace_path"],
       "codexThreadId" => run["codex_thread_id"],
       "turnId" => run["turn_id"],
@@ -417,13 +419,31 @@ defmodule SymphoniaService.TaskStore do
       "nextReviewAction" => handoff["next_review_action"],
       "headBranch" => handoff["head_branch"],
       "baseBranch" => handoff["base_branch"],
-      "curatedSummaryPath" => handoff["curated_summary_path"]
+      "curatedSummaryPath" => handoff["curated_summary_path"],
+      "validationEvidence" => public_validation_evidence(handoff["validation_evidence"])
     }
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
     |> Map.new()
   end
 
   defp public_handoff(_handoff), do: nil
+
+  defp public_validation_evidence(nil), do: nil
+
+  defp public_validation_evidence(values) do
+    values
+    |> List.wrap()
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(fn item ->
+      %{
+        "label" => item["label"],
+        "status" => item["status"],
+        "detail" => item["detail"]
+      }
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.new()
+    end)
+  end
 
   defp number_from_url(nil, _segment), do: nil
 

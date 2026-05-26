@@ -110,7 +110,7 @@ function applyLifecycle(
           review_approved: false,
           review_summary:
             stringParam(params.summary) ??
-            "Clarise produced a reviewable handoff.",
+            "Codex produced a reviewable handoff.",
           files_changed: arrayParam(params.files_changed ?? params.filesChanged) ?? [
             `symphonia/tasks/${key}.md`,
           ],
@@ -122,14 +122,19 @@ function applyLifecycle(
       };
     }
     case "fail_run":
+      const pausedReason =
+        stringParam(params.paused_reason ?? params.pausedReason) === "blocked_by_setup"
+          ? "blocked_by_setup"
+          : "run_failed";
+
       return {
         frontmatter: {
           ...base,
           status: "paused",
-          paused_reason: "run_failed",
+          paused_reason: pausedReason,
           paused_explanation:
             stringParam(params.explanation) ??
-            "Clarise could not produce a reviewable handoff.",
+            "Codex could not produce a reviewable handoff.",
         },
         body,
       };
@@ -146,13 +151,14 @@ function applyLifecycle(
         body,
       };
     case "approve": {
-      const requiresPr = params.requires_pr !== false && params.requiresPr !== false;
       return {
         frontmatter: {
           ...base,
-          status: requiresPr ? "in_review" : "completed",
+          status: "in_review",
           review_approved: true,
-          next_review_action: requiresPr ? "Open pull request." : null,
+          review_state: "approved",
+          next_step: "open_pull_request",
+          next_review_action: "Open pull request.",
         },
         body,
       };
@@ -165,7 +171,7 @@ function applyLifecycle(
           ...base,
           status: "in_progress",
           review_approved: false,
-          next_review_action: "Clarise is continuing with requested changes.",
+          next_review_action: "Codex is continuing with requested changes.",
         },
         body: appendReviewNotes(body, feedback, checklist),
       };

@@ -150,6 +150,17 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     end
   end
 
+  test "opening a pull request is approval-gated", %{
+    repo_path: repo_path,
+    repository: repository
+  } do
+    write_task(repo_path, "task-branch", false)
+
+    assert_raise ArgumentError, "Approve the handoff before opening a pull request.", fn ->
+      PullRequests.open_from_task(repository, "SYM-1")
+    end
+  end
+
   test "merged pull request completes task and closes linked issue", %{
     repo_path: repo_path,
     repository: repository
@@ -191,15 +202,15 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     end
   end
 
-  defp write_task(repo_path, head_branch) do
+  defp write_task(repo_path, head_branch, approved \\ true) do
     File.write!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]), """
     ---
     key: SYM-1
     title: GitHub PR task
     status: in_review
     priority: high
-    review_approved: true
-    review_state: approved
+    review_approved: #{approved}
+    review_state: #{if(approved, do: "approved", else: "changes_requested")}
     files_changed:
       - app/page.tsx
     github:

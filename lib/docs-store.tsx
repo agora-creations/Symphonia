@@ -14,7 +14,7 @@ import {
  * Notion-like document store for Symphonía.
  *
  * Every durable workspace object (Task brief, Project page, Doc, Decision,
- * Review, Run Summary, plus root automation rules) lives here as a Markdown-backed
+ * Review, Run Summary, plus root repository rules) lives here as a Markdown-backed
  * page with a stable repo file path. Paths follow the configurable doc root:
  *
  *   symphonia/projects/<id>.md
@@ -66,7 +66,7 @@ export const CATEGORY_LABELS: Record<DocCategory, string> = {
   decision: "Decisions",
   review: "Reviews",
   "run-summary": "Run Summaries",
-  workflow: "Workflow",
+  workflow: "Repository rules",
 };
 
 export const CATEGORY_SINGULAR: Record<DocCategory, string> = {
@@ -76,7 +76,7 @@ export const CATEGORY_SINGULAR: Record<DocCategory, string> = {
   decision: "Decision",
   review: "Review",
   "run-summary": "Run Summary",
-  workflow: "Workflow",
+  workflow: "Repository rules",
 };
 
 export const COVERS = [
@@ -96,7 +96,7 @@ export const COMMON_ICONS = [
 const STORAGE_KEY = "symphonia.docs.v1";
 
 function pathFor(category: DocCategory, slug: string): string {
-  if (category === "workflow") return "Automation Rules";
+  if (category === "workflow") return "Repository rules";
   const folder: Record<Exclude<DocCategory, "workflow">, string> = {
     task: "symphonia/tasks",
     project: "symphonia/projects",
@@ -135,10 +135,10 @@ function buildSeed(): DocPage[] {
       repo,
       category: "workflow",
       path: "WORKFLOW" + ".md",
-      title: "Automation Rules",
+      title: "Repository rules",
       icon: "🧭",
       body:
-        "# Automation rules\n# Simple PR — Clarise runs, opens a PR, human reviews on GitHub.\n\non_task_started:\n  - assign: clarise\n  - require_pr: true\n\non_run_complete:\n  - status: in_review\n  - notify_assignees: true\n\non_pr_merged:\n  - status: completed\n",
+        "# Repository rules\n# Simple PR — Clarise runs, opens a PR, human reviews on GitHub.\n\non_task_started:\n  - assign: clarise\n  - require_pr: true\n\non_run_complete:\n  - status: in_review\n  - notify_assignees: true\n\non_pr_merged:\n  - status: completed\n",
       createdAt: now,
       updatedAt: now,
     });
@@ -156,7 +156,7 @@ function buildSeed(): DocPage[] {
         body:
           "# Architecture\n\nSymphonía is a Notion-like workspace backed by repositories. " +
           "Every durable object — Task, Project, Doc, Decision, Review, Run Summary, plus " +
-          "root automation rules — is canonical Markdown in the repository.\n\n" +
+          "root repository rules — is canonical Markdown in the repository.\n\n" +
           "## What you are looking at\n\nThis page is a long-form doc in the workspace. " +
           "It edits as Markdown and saves back to `symphonia/docs/architecture.md`.\n\n" +
           "## Why it matters\n\nDocuments are the system of record. GitHub and Linear " +
@@ -403,7 +403,7 @@ export function DocsProvider({ children }: { children: ReactNode }) {
         repo,
         category: "workflow",
         path: "WORKFLOW" + ".md",
-        title: "Automation Rules",
+        title: "Repository rules",
         icon: "🧭",
         body: "",
         createdAt: now,

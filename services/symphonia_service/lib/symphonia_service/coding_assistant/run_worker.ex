@@ -6,6 +6,7 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
   use GenServer
 
   alias SymphoniaService.CodingAssistant.{
+    AppServerClient,
     HandoffBuilder,
     RunEvents,
     RunRegistry,
@@ -112,38 +113,45 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
   defp handle_provider_error(%{"kind" => "review_continuation"} = state, run, reason) do
     attempt = state["attempt"]
     max_attempts = state["max_attempts"]
-    failed_run = RunStore.mark_failed(run, reason, failure_explanation_for_state(state, reason))
+    public_message = failure_explanation_for_state(state, reason)
+    failed_run = RunStore.mark_failed(run, reason, public_message)
 
-    if attempt < max_attempts do
-      next_attempt = attempt + 1
+    cond do
+      AppServerClient.setup_blocker?(public_message) ->
+        task = fail_task(state, failed_run, public_message)
+        {:done, failed_run, task}
 
-      TaskStore.patch_task(state["repository"], state["task_key"], %{
-        "frontmatter" => %{
-          "run" => run_frontmatter(failed_run),
-          "review_continuation" =>
-            continuation_state(state["review_note_id"], next_attempt, max_attempts)
-        }
-      })
+      attempt < max_attempts ->
+        next_attempt = attempt + 1
 
-      next_run =
-        RunStore.create(%{
-          "provider" => failed_run["provider"],
-          "repository" => failed_run["repository"],
-          "task" => failed_run["task"],
-          "kind" => "review_continuation",
-          "input" => state["assistant_input"],
-          "review_note_id" => state["review_note_id"],
-          "attempt" => next_attempt,
-          "max_attempts" => max_attempts
+        TaskStore.patch_task(state["repository"], state["task_key"], %{
+          "frontmatter" => %{
+            "run" => run_frontmatter(failed_run),
+            "review_continuation" =>
+              continuation_state(state["review_note_id"], next_attempt, max_attempts)
+          }
         })
-        |> RunStore.mark_running()
 
-      put_task_run(state["repository"], state["task_key"], next_run)
+        next_run =
+          RunStore.create(%{
+            "provider" => failed_run["provider"],
+            "repository" => failed_run["repository"],
+            "task" => failed_run["task"],
+            "kind" => "review_continuation",
+            "input" => state["assistant_input"],
+            "review_note_id" => state["review_note_id"],
+            "attempt" => next_attempt,
+            "max_attempts" => max_attempts
+          })
+          |> RunStore.mark_running()
 
-      {:retry, %{state | "run" => next_run, "attempt" => next_attempt}}
-    else
-      task = fail_task(state, failed_run, failure_explanation_for_state(state, reason))
-      {:done, failed_run, task}
+        put_task_run(state["repository"], state["task_key"], next_run)
+
+        {:retry, %{state | "run" => next_run, "attempt" => next_attempt}}
+
+      true ->
+        task = fail_task(state, failed_run, public_message)
+        {:done, failed_run, task}
     end
   end
 
@@ -163,7 +171,10 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
 
   defp fail_task(state, run, public_message) do
     state["repository"]
-    |> TaskStore.apply_event(state["task_key"], "fail_run", %{"explanation" => public_message})
+    |> TaskStore.apply_event(state["task_key"], "fail_run", %{
+      "explanation" => public_message,
+      "paused_reason" => paused_reason_for(public_message)
+    })
     |> then(fn _task -> put_task_run(state["repository"], state["task_key"], run) end)
   end
 
@@ -224,6 +235,8 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
       "state" => run["state"],
       "current_step" => run["current_step"],
       "message" => RunEvents.public_message(run),
+      "display_step" => RunEvents.display_step(run),
+      "display_message" => RunEvents.display_message(run),
       "workspace_path" => run["workspace_path"],
       "codex_thread_id" => run["codex_thread_id"],
       "turn_id" => run["turn_id"],
@@ -263,7 +276,11 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
   defp public_failure_reason?("The Coding Assistant can't start" <> _rest), do: true
   defp public_failure_reason?("The Coding Assistant did not produce" <> _rest), do: true
   defp public_failure_reason?("The Coding Assistant could not finish" <> _rest), do: true
-  defp public_failure_reason?(_reason), do: false
+  defp public_failure_reason?(reason), do: AppServerClient.setup_blocker?(reason)
+
+  defp paused_reason_for(reason) do
+    if AppServerClient.setup_blocker?(reason), do: "blocked_by_setup", else: "run_failed"
+  end
 
   defp shutdown_provider_task(nil), do: :ok
 

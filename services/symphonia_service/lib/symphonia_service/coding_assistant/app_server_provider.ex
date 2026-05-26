@@ -18,8 +18,9 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
   def id, do: "codex_app_server"
 
   @impl true
-  def preflight(repository, task, _params) do
+  def preflight(repository, task, params) do
     with :ok <- AppServerClient.ensure_schema_bundle!(),
+         :ok <- AppServerClient.ensure_daemon_ready!(app_server_opts(%{}, params)),
          :ok <- branch_preflight(repository, task) do
       :ok
     end
@@ -33,6 +34,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
       {:error, "The Coding Assistant could not produce a reviewable handoff."}
     else
       with :ok <- AppServerClient.ensure_schema_bundle!(),
+           :ok <- AppServerClient.ensure_daemon_ready!(app_server_opts(run, params)),
            :ok <- branch_preflight(repository, task) do
         BranchManager.with_persistent_task_branch_worktree(repository, task, fn context ->
           RunStore.update_metadata(run, %{
@@ -76,11 +78,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
   end
 
   defp invoke_app_server(run, repo_path, prompt) do
-    opts = [
-      thread_id: run["codex_thread_id"],
-      command: System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND"),
-      args: app_server_args()
-    ]
+    opts = app_server_opts(run, %{})
 
     case AppServerClient.run_turn(repo_path, prompt, opts) do
       {:ok, output} ->
@@ -106,6 +104,14 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
         RunStore.record_provider_output(run, %{"app_server_events" => events})
         {:error, reason}
     end
+  end
+
+  defp app_server_opts(run, _params) do
+    [
+      thread_id: run["codex_thread_id"],
+      command: System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND"),
+      args: app_server_args()
+    ]
   end
 
   defp detect_and_clean_changes(run, repo_path) do

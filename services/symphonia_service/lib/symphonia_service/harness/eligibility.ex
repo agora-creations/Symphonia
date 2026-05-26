@@ -3,7 +3,7 @@ defmodule SymphoniaService.Harness.Eligibility do
   Deterministic eligibility checks for the always-on task harness.
   """
 
-  alias SymphoniaService.{SpecWorkspace, TaskStore}
+  alias SymphoniaService.{SpecWorkspace, TaskStore, Workspace}
   alias SymphoniaService.CodingAssistant.{BranchManager, RunEvents, RunStore}
   alias SymphoniaService.Harness.Automation
 
@@ -11,10 +11,12 @@ defmodule SymphoniaService.Harness.Eligibility do
 
   def explain(repository, task) when is_map(repository) and is_map(task) do
     checks = [
+      workspace_check(repository),
       automation_check(repository),
+      automation_rules_check(repository),
       github_check(repository),
       status_check(task),
-      source_check(repository, task),
+      task_charter_check(repository, task),
       dependency_check(repository, task),
       active_run_check(repository, task),
       handoff_check(task),
@@ -53,11 +55,41 @@ defmodule SymphoniaService.Harness.Eligibility do
 
   def eligible?(repository, task), do: explain(repository, task)["eligible"] == true
 
+  defp workspace_check(repository) do
+    state = Workspace.state(repository)
+
+    case state["missingDirectories"] || [] do
+      [] ->
+        ok("workspace_ready", "Repository workspace folders are present.")
+
+      missing ->
+        fail(
+          "workspace_missing",
+          "Repository workspace folders are missing: #{Enum.join(missing, ", ")}."
+        )
+    end
+  end
+
   defp automation_check(repository) do
     if Automation.enabled?(repository) do
       ok("automation_enabled", "Repository automation is enabled.")
     else
       fail("automation_disabled", "Repository automation is disabled.")
+    end
+  end
+
+  defp automation_rules_check(repository) do
+    workflow = Workspace.workflow(repository)
+
+    cond do
+      workflow["exists"] != true ->
+        fail("workflow_missing", "Repository automation rules are missing. Create WORKFLOW.md.")
+
+      String.trim(workflow["body"] || "") == "" ->
+        fail("workflow_invalid", "Repository automation rules are empty. Update WORKFLOW.md.")
+
+      true ->
+        ok("workflow_ready", "Repository automation rules are present.")
     end
   end
 
@@ -82,13 +114,16 @@ defmodule SymphoniaService.Harness.Eligibility do
     )
   end
 
-  defp source_check(repository, task) do
+  defp task_charter_check(repository, task) do
     source_milestone = task["sourceMilestone"] || get_in(task, [:frontmatter, "source_milestone"])
     generated_by = task["generatedBy"] || get_in(task, [:frontmatter, "generated_by"])
 
     cond do
+      blank?(generated_by) ->
+        ok("markdown_task", "Task is backed by repository Markdown.")
+
       generated_by != @generated_by ->
-        fail("not_clarise_generated", "Task was not generated from a Clarise milestone plan.")
+        ok("markdown_task", "Task is backed by repository Markdown.")
 
       blank?(source_milestone) ->
         fail("missing_source_milestone", "Task is missing source milestone metadata.")

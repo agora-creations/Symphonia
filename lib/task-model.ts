@@ -59,6 +59,8 @@ export interface CodingAssistantRun {
   label?: string;
   currentStep?: string;
   message?: string;
+  displayStep?: string;
+  displayMessage?: string;
   workspacePath?: string;
   codexThreadId?: string;
   turnId?: string;
@@ -84,6 +86,13 @@ export interface CodingAssistantHandoff {
   headBranch?: string;
   baseBranch?: string;
   curatedSummaryPath?: string;
+  validationEvidence?: ValidationEvidence[];
+}
+
+export interface ValidationEvidence {
+  label: string;
+  status: "passed" | "failed" | "not_run";
+  detail: string;
 }
 
 export interface TaskEligibilityCheck {

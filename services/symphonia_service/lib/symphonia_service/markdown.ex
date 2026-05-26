@@ -94,6 +94,8 @@ defmodule SymphoniaService.Markdown do
       "state",
       "current_step",
       "message",
+      "display_step",
+      "display_message",
       "workspace_path",
       "codex_thread_id",
       "turn_id",
@@ -122,7 +124,8 @@ defmodule SymphoniaService.Markdown do
       "next_review_action",
       "head_branch",
       "base_branch",
-      "curated_summary_path"
+      "curated_summary_path",
+      "validation_evidence"
     ]
   }
 
@@ -204,6 +207,9 @@ defmodule SymphoniaService.Markdown do
     value = String.trim(value)
 
     cond do
+      String.starts_with?(value, "[") or String.starts_with?(value, "{") ->
+        parse_json_scalar(value)
+
       Regex.match?(~r/^\d+$/, value) ->
         String.to_integer(value)
 
@@ -212,6 +218,15 @@ defmodule SymphoniaService.Markdown do
         |> String.trim_leading("\"")
         |> String.trim_trailing("\"")
     end
+  end
+
+  defp parse_json_scalar(value) do
+    JSON.decode!(value)
+  rescue
+    _ ->
+      value
+      |> String.trim_leading("\"")
+      |> String.trim_trailing("\"")
   end
 
   defp render_entry(key, values) when is_list(values) do
@@ -244,10 +259,15 @@ defmodule SymphoniaService.Markdown do
   defp render_nested_entry(key, values, level) when is_list(values) do
     prefix = indent(level) <> key <> ":"
 
-    if Enum.empty?(values) do
-      prefix
-    else
-      [prefix | Enum.map(values, &(indent(level + 1) <> "- " <> format_scalar(&1)))]
+    cond do
+      Enum.empty?(values) ->
+        prefix
+
+      Enum.all?(values, &is_map/1) ->
+        prefix <> " " <> JSON.encode!(values)
+
+      true ->
+        [prefix | Enum.map(values, &(indent(level + 1) <> "- " <> format_scalar(&1)))]
     end
   end
 

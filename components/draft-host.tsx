@@ -52,7 +52,7 @@ const CATEGORY_TITLE_HINT: Record<DocCategory, string> = {
   decision: "New Decision",
   review: "New Review",
   "run-summary": "New Run Summary",
-  workflow: "Automation Rules",
+  workflow: "Repository rules",
 };
 
 /**

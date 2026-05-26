@@ -23,6 +23,13 @@ defmodule SymphoniaService.LifecycleTest do
     assert updated.frontmatter["paused_reason"] == "run_failed"
   end
 
+  test "setup blocker pauses the task with setup reason" do
+    updated = Lifecycle.apply_event(task(), "fail_run", %{"paused_reason" => "blocked_by_setup"})
+
+    assert updated.frontmatter["status"] == "paused"
+    assert updated.frontmatter["paused_reason"] == "blocked_by_setup"
+  end
+
   test "request changes stores original feedback and checklist" do
     feedback =
       "The card is too dense. Remove validation from the default card. Keep retry visible only when paused."
@@ -34,6 +41,16 @@ defmodule SymphoniaService.LifecycleTest do
     assert updated.body =~ feedback
     assert updated.body =~ "- [ ] Remove validation from the default card"
     assert updated.body =~ "- [ ] Keep retry visible only when paused"
+  end
+
+  test "approval only marks the handoff approved and keeps PR publishing gated" do
+    updated = Lifecycle.apply_event(task(), "approve", %{"requires_pr" => false})
+
+    assert updated.frontmatter["status"] == "in_review"
+    assert updated.frontmatter["review_approved"] == true
+    assert updated.frontmatter["review_state"] == "approved"
+    assert updated.frontmatter["next_step"] == "open_pull_request"
+    refute updated.frontmatter["github_pr"]
   end
 
   test "merged pull request completes the task and closes linked issue" do

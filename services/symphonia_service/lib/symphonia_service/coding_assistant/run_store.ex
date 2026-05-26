@@ -143,6 +143,8 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "label" => RunEvents.label(run["state"]),
       "currentStep" => run["current_step"] || RunEvents.default_step(run["state"]),
       "message" => RunEvents.public_message(run),
+      "displayStep" => RunEvents.display_step(run),
+      "displayMessage" => RunEvents.display_message(run),
       "workspacePath" => run["workspace_path"],
       "codexThreadId" => run["codex_thread_id"],
       "turnId" => run["turn_id"],
@@ -217,7 +219,9 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
   defp save(run, opts) do
     path = path(run, opts)
     path |> Path.dirname() |> File.mkdir_p!()
-    File.write!(path, JSON.encode!(run))
+    temp_path = "#{path}.tmp-#{System.unique_integer([:positive])}"
+    File.write!(temp_path, JSON.encode!(run))
+    File.rename!(temp_path, path)
     chmod_private(path)
     run
   end

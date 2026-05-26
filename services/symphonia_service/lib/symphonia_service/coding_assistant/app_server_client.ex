@@ -7,6 +7,14 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
   """
 
   @default_timeout_ms 900_000
+  @managed_standalone_relative_path Path.join([
+                                      ".codex",
+                                      "packages",
+                                      "standalone",
+                                      "current",
+                                      "codex"
+                                    ])
+  @setup_blocker_message "Codex is not ready on this machine. Symphonia could not find the managed Codex standalone binary needed to start Codex App Server. Install or repair Codex locally, then retry. No changes were made."
   @schema_files [
     "ClientRequest.json",
     "v2/ThreadStartParams.json",
@@ -28,16 +36,43 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
     :ok
   end
 
-  def ensure_daemon!(opts \\ []) do
-    if truthy?(System.get_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON")) do
-      :ok
-    else
-      bin = codex_bin!(opts)
+  def setup_blocker_message, do: @setup_blocker_message
 
-      case System.cmd(bin, ["app-server", "daemon", "start"], stderr_to_stdout: true) do
-        {_output, 0} -> :ok
-        {output, _status} -> raise ArgumentError, clean_output(output)
-      end
+  def setup_blocker?(reason) when is_binary(reason) do
+    String.trim(reason) == @setup_blocker_message
+  end
+
+  def setup_blocker?(_reason), do: false
+
+  def ensure_daemon_ready!(opts \\ []) do
+    cond do
+      truthy?(System.get_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON")) ->
+        :ok
+
+      app_server_command_override?(opts) ->
+        :ok
+
+      true ->
+        daemon_bin!(opts)
+        :ok
+    end
+  end
+
+  def ensure_daemon!(opts \\ []) do
+    cond do
+      truthy?(System.get_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON")) ->
+        :ok
+
+      app_server_command_override?(opts) ->
+        :ok
+
+      true ->
+        bin = daemon_bin!(opts)
+
+        case System.cmd(bin, ["app-server", "daemon", "start"], stderr_to_stdout: true) do
+          {_output, 0} -> :ok
+          {output, _status} -> raise ArgumentError, clean_daemon_output(output)
+        end
     end
   end
 
@@ -269,29 +304,36 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
 
   defp app_server_command(opts) do
     cond do
-      command = Keyword.get(opts, :command) ->
+      command = nonblank(Keyword.get(opts, :command)) ->
         {command, Keyword.get(opts, :args, [])}
 
-      command = System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND") ->
+      command = nonblank(System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND")) ->
         {command, split_args(System.get_env("SYMPHONIA_CODEX_APP_SERVER_ARGS") || "")}
 
       true ->
-        {codex_bin!(opts), ["app-server", "proxy"]}
+        {daemon_bin!(opts), ["app-server", "proxy"]}
     end
   end
 
   defp split_args(""), do: []
   defp split_args(value), do: String.split(value, " ", trim: true)
 
-  defp codex_bin!(opts) do
-    configured =
-      Keyword.get(opts, :codex_bin) ||
-        System.get_env("SYMPHONIA_CODEX_BIN") ||
-        System.get_env("SYMPHONIA_CODEX_APP_SERVER_BIN") ||
-        "codex"
+  defp daemon_bin!(opts) do
+    case configured_codex_bin(opts) do
+      value when is_binary(value) and value != "" -> executable_bin!(value)
+      _ -> managed_standalone_bin!()
+    end
+  end
 
+  defp configured_codex_bin(opts) do
+    Keyword.get(opts, :codex_bin) ||
+      System.get_env("SYMPHONIA_CODEX_BIN") ||
+      System.get_env("SYMPHONIA_CODEX_APP_SERVER_BIN")
+  end
+
+  defp executable_bin!(configured) do
     cond do
-      Path.type(configured) == :absolute and File.exists?(configured) ->
+      Path.type(configured) == :absolute and executable_file?(configured) ->
         configured
 
       executable = System.find_executable(configured) ->
@@ -302,6 +344,45 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
               "The Coding Assistant can't start because Codex is not available on this computer."
     end
   end
+
+  defp managed_standalone_bin! do
+    path = managed_standalone_path()
+
+    if executable_file?(path) do
+      path
+    else
+      raise ArgumentError, @setup_blocker_message
+    end
+  end
+
+  defp managed_standalone_path do
+    case System.get_env("SYMPHONIA_CODEX_APP_SERVER_STANDALONE_BIN") do
+      value when is_binary(value) and value != "" ->
+        Path.expand(value)
+
+      _ ->
+        Path.join(System.user_home!(), @managed_standalone_relative_path)
+    end
+  end
+
+  defp executable_file?(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{type: :regular, mode: mode}} -> Bitwise.band(mode, 0o111) != 0
+      _ -> false
+    end
+  end
+
+  defp app_server_command_override?(opts) do
+    command = Keyword.get(opts, :command) || System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND")
+    not is_nil(nonblank(command))
+  end
+
+  defp nonblank(value) when is_binary(value) do
+    value = String.trim(value)
+    if value == "", do: nil, else: value
+  end
+
+  defp nonblank(_value), do: nil
 
   defp schema_root do
     Path.expand(Path.join([__DIR__, "..", "..", "..", "priv", "codex_app_server_schema"]))
@@ -398,6 +479,16 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
     |> case do
       "" -> "Codex App Server daemon could not start."
       message -> message
+    end
+  end
+
+  defp clean_daemon_output(output) do
+    output = to_string(output)
+
+    if String.contains?(output, "managed standalone Codex install not found") do
+      @setup_blocker_message
+    else
+      clean_output(output)
     end
   end
 

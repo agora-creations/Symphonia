@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   PRIORITY_LABELS,
@@ -21,12 +21,23 @@ import { UserAvatar } from "@/components/avatar-stack";
 import { useNewTask } from "@/components/new-task-dialog";
 import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport";
 import { cn } from "@/lib/utils";
-import { harnessLabel, harnessStatusForTask, isActiveRun } from "@/lib/harness-ui-model";
-import type { RepositoryAutomationState, WorkspaceState } from "@/lib/repository-model";
 import {
+  harnessLabel,
+  harnessStatusForTask,
+  isActiveRun,
+  runDisplayForTask,
+} from "@/lib/harness-ui-model";
+import type { RepositoryAutomationState, WorkspaceState } from "@/lib/repository-model";
+import type { RepositoryGitHubState } from "@/lib/repository-model";
+import {
+  AlertTriangle,
   Bot,
+  Check,
+  FileCheck2,
   Filter,
+  Github,
   Plus,
+  Power,
   SlidersHorizontal,
   LayoutGrid,
   List,
@@ -51,6 +62,36 @@ async function fetchAutomation(repoKey: string): Promise<RepositoryAutomationSta
   };
   if (!res.ok || !payload.automation) {
     throw new Error(payload.error ?? "Could not load automation");
+  }
+  return payload.automation;
+}
+
+async function fetchRepositoryGitHub(repoKey: string): Promise<RepositoryGitHubState> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/github`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as {
+    github?: RepositoryGitHubState;
+    error?: string;
+  };
+  if (!res.ok || !payload.github) {
+    throw new Error(payload.error ?? "Could not load GitHub state");
+  }
+  return payload.github;
+}
+
+async function setAutomationEnabled(repoKey: string): Promise<RepositoryAutomationState> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/automation/enable`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ provider: "codex_app_server" }),
+  });
+  const payload = (await res.json()) as {
+    automation?: RepositoryAutomationState;
+    error?: string;
+  };
+  if (!res.ok || !payload.automation) {
+    throw new Error(payload.error ?? "Codex is not available yet. You can finish repository setup now and enable Codex later.");
   }
   return payload.automation;
 }
@@ -127,7 +168,7 @@ async function startCodingAssistantRun(repoKey: string, taskKey: string): Promis
   );
   const payload = (await res.json()) as { task?: ServiceTask; error?: string };
   if (!res.ok || !payload.task) {
-    throw new Error(payload.error ?? "Could not start Clarise");
+    throw new Error(payload.error ?? "Could not start Codex");
   }
   return payload.task;
 }
@@ -145,7 +186,7 @@ async function cancelCodingAssistantRun(
   );
   const payload = (await res.json()) as { task?: ServiceTask; error?: string };
   if (!res.ok || !payload.task) {
-    throw new Error(payload.error ?? "Could not cancel Clarise run");
+    throw new Error(payload.error ?? "Could not cancel Codex run");
   }
   return payload.task;
 }
@@ -193,6 +234,7 @@ function TaskCard({
   const pausedReason = pausedReasonLabel(task.pausedReason);
   const activeRun = task.run && isActiveRun(task.run) ? task.run : null;
   const harnessStatus = harnessStatusForTask(task, eligibility);
+  const activeRunDisplay = runDisplayForTask({ run: activeRun });
   return (
     <article className="rounded-md border bg-card p-2.5 text-card-foreground shadow-sm transition-colors hover:border-foreground/20">
       <Link href={`/r/${repoSlug}/tasks/${encodeURIComponent(task.key)}`} className="block">
@@ -214,7 +256,7 @@ function TaskCard({
           )}
           {activeRun && (
             <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-600 dark:text-sky-400">
-              {activeRun.currentStep ?? activeRun.label ?? "Working"}
+              {activeRunDisplay.step ?? activeRun.label ?? "Working"}
             </span>
           )}
           {harnessStatus && (
@@ -240,7 +282,9 @@ function TaskCard({
         </div>
       </Link>
       <div className="mt-2 flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground">{task.assistant ?? "Unassigned"}</span>
+        <span className="text-[10px] text-muted-foreground">
+          {task.run || task.handoff ? "Codex" : "Unassigned"}
+        </span>
         {task.assignee && <UserAvatar user={task.assignee} size={18} />}
       </div>
       <TaskActionBar task={task} repoSlug={repoSlug} onEvent={onEvent} pending={pending} compact />
@@ -267,6 +311,7 @@ function TaskRow({
   const pausedReason = pausedReasonLabel(task.pausedReason);
   const activeRun = task.run && isActiveRun(task.run) ? task.run : null;
   const harnessStatus = harnessStatusForTask(task, eligibility);
+  const activeRunDisplay = runDisplayForTask({ run: activeRun });
   return (
     <div className="grid grid-cols-[1.5rem_4.5rem_1fr_auto] items-center gap-3 border-b px-4 py-2 last:border-b-0 hover:bg-muted/40">
       <Link
@@ -293,7 +338,7 @@ function TaskRow({
         )}
         {activeRun && (
           <span className="hidden md:inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-600 dark:text-sky-400">
-            {activeRun.currentStep ?? activeRun.label ?? "Working"}
+            {activeRunDisplay.step ?? activeRun.label ?? "Working"}
           </span>
         )}
         {harnessStatus && (
@@ -325,7 +370,9 @@ async function fetchWorkspace(repoKey: string): Promise<WorkspaceState> {
     cache: "no-store",
   });
   const payload = (await res.json()) as { workspace?: WorkspaceState; error?: string };
-  if (!res.ok || !payload.workspace) throw new Error(payload.error ?? "Could not load workspace");
+  if (!res.ok || !payload.workspace) {
+    throw new Error(payload.error ?? "Could not load repository setup");
+  }
   return payload.workspace;
 }
 
@@ -336,7 +383,7 @@ async function initializeWorkspace(repoKey: string): Promise<WorkspaceState> {
   );
   const payload = (await res.json()) as { workspace?: WorkspaceState; error?: string };
   if (!res.ok || !payload.workspace) {
-    throw new Error(payload.error ?? "Could not create workspace folders");
+    throw new Error(payload.error ?? "Could not create Symphonia files");
   }
   return payload.workspace;
 }
@@ -356,10 +403,12 @@ export function TasksView({ repoKey }: { repoKey: string }) {
   const [error, setError] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [automation, setAutomation] = useState<RepositoryAutomationState | null>(null);
+  const [github, setGithub] = useState<RepositoryGitHubState | null>(null);
   const [eligibilityByTask, setEligibilityByTask] = useState<
     Record<string, TaskEligibilityExplanation>
   >({});
   const [workspacePending, setWorkspacePending] = useState(false);
+  const [automationPending, setAutomationPending] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [sourceMilestone, setSourceMilestone] = useState<string | null>(null);
   const [createdTaskKeys, setCreatedTaskKeys] = useState<string[]>([]);
@@ -407,7 +456,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
           if (!cancelled) setTasks(nextTasks);
         })
         .catch((err: unknown) => {
-          if (!cancelled) setError(err instanceof Error ? err.message : "Could not load tasks");
+          if (!cancelled) setError(safeMessage(err, "Could not load tasks"));
         });
     }, 2500);
 
@@ -455,16 +504,22 @@ export function TasksView({ repoKey }: { repoKey: string }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([fetchWorkspace(repoKey), fetchTasks(repoKey), fetchAutomation(repoKey)])
-      .then(([nextWorkspace, nextTasks, nextAutomation]) => {
+    Promise.all([
+      fetchWorkspace(repoKey),
+      fetchTasks(repoKey),
+      fetchAutomation(repoKey),
+      fetchRepositoryGitHub(repoKey).catch(() => null),
+    ])
+      .then(([nextWorkspace, nextTasks, nextAutomation, nextGithub]) => {
         if (!cancelled) {
           setWorkspace(nextWorkspace);
           setTasks(nextTasks);
           setAutomation(nextAutomation);
+          setGithub(nextGithub);
         }
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load tasks");
+        if (!cancelled) setError(safeMessage(err, "Could not load tasks"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -533,9 +588,16 @@ export function TasksView({ repoKey }: { repoKey: string }) {
             : action.kind === "open_pull_request"
             ? await openPullRequest(repoKey, task.key)
             : await refreshPullRequest(repoKey, task.key);
+      if (action.kind === "coding_assistant_run") {
+        window.dispatchEvent(
+          new CustomEvent("symphonia:codexRunStarted", {
+            detail: { repoKey, taskKey: task.key },
+          }),
+        );
+      }
       setTasks((current) => current.map((item) => (item.key === updated.key ? updated : item)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update task");
+      setError(safeMessage(err, "Could not update task"));
     } finally {
       setPendingKey(null);
     }
@@ -547,9 +609,21 @@ export function TasksView({ repoKey }: { repoKey: string }) {
     try {
       setWorkspace(await initializeWorkspace(repoKey));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create workspace folders");
+      setError(safeMessage(err, "Could not create Symphonia files"));
     } finally {
       setWorkspacePending(false);
+    }
+  };
+
+  const enableCodex = async () => {
+    setAutomationPending(true);
+    setError(null);
+    try {
+      setAutomation(await setAutomationEnabled(repoKey));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Codex is not available yet. You can finish repository setup now and enable Codex later.");
+    } finally {
+      setAutomationPending(false);
     }
   };
 
@@ -633,6 +707,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
             <SlidersHorizontal className="h-3.5 w-3.5" /> Display
           </button>
           <button
+            id="create-first-task-button"
             onClick={() => newTask.open()}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-2 py-1 text-[12px] hover:opacity-90"
           >
@@ -647,10 +722,18 @@ export function TasksView({ repoKey }: { repoKey: string }) {
         </div>
       )}
 
-      {automation && !automation.enabled && !loading && (
-        <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-          Clarise automation is turned off. You can still assign and manage tasks manually.
-        </div>
+      {workspace && automation && !loading && (
+        <RepositorySetupStatus
+          repoKey={repoKey}
+          repoSlug={repoSlug}
+          workspace={workspace}
+          automation={automation}
+          github={github}
+          workspacePending={workspacePending}
+          automationPending={automationPending}
+          onCreateFiles={createWorkspaceFolders}
+          onEnableCodex={enableCodex}
+        />
       )}
 
       {sourceMilestone && !loading && (
@@ -680,36 +763,6 @@ export function TasksView({ repoKey }: { repoKey: string }) {
                 Show all tasks
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {workspace && (!workspace.initialized || !workspace.workflow.exists) && (
-        <div className="border-b bg-muted/30 px-4 py-2 text-xs">
-          <div className="flex flex-wrap items-center gap-2">
-            {!workspace.initialized && (
-              <>
-                <span className="text-muted-foreground">This repository needs to be set up.</span>
-                <button
-                  onClick={createWorkspaceFolders}
-                  disabled={workspacePending}
-                  className="rounded-md border bg-background px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {workspacePending ? "Setting up…" : "Set up repository"}
-                </button>
-              </>
-            )}
-            {!workspace.workflow.exists && (
-              <>
-                <span className="text-muted-foreground">Automation rules haven&apos;t been set up yet.</span>
-                <Link
-                  href={`/r/${repoSlug}/workflow`}
-                  className="rounded-md border bg-background px-2 py-1 hover:bg-muted"
-                >
-                  Set up automation
-                </Link>
-              </>
-            )}
           </div>
         </div>
       )}
@@ -794,6 +847,226 @@ export function TasksView({ repoKey }: { repoKey: string }) {
   );
 }
 
+function RepositorySetupStatus({
+  repoKey,
+  repoSlug,
+  workspace,
+  automation,
+  github,
+  workspacePending,
+  automationPending,
+  onCreateFiles,
+  onEnableCodex,
+}: {
+  repoKey: string;
+  repoSlug: string;
+  workspace: WorkspaceState;
+  automation: RepositoryAutomationState;
+  github: RepositoryGitHubState | null;
+  workspacePending: boolean;
+  automationPending: boolean;
+  onCreateFiles: () => void;
+  onEnableCodex: () => void;
+}) {
+  const filesReady = workspace.initialized;
+  const rulesReady = workspace.workflow.exists && workspace.workflow.valid;
+  const githubReady = github?.access?.state === "linked" || github?.link != null;
+  const codexReady = automation.enabled;
+  const baseReady = filesReady && rulesReady;
+  const allReady = baseReady && githubReady && codexReady;
+  const installUrl = withRepoState(github?.connection.installationUrl, repoKey);
+  const manageUrl = github?.connection.manageUrl ?? github?.connection.installationUrl;
+
+  return (
+    <section
+      id="repository-setup-status"
+      data-repository-ready={baseReady ? "true" : "false"}
+      className="border-b bg-muted/20 px-4 py-3"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold">Repository setup</h2>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
+                allReady
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  : baseReady
+                    ? "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+              )}
+            >
+              {allReady ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+              {allReady ? "Repository is ready" : baseReady ? "Ready for tasks" : "Needs setup"}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Set up this repository so Codex can work safely. Tour progress does not change setup
+            status.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 md:grid-cols-4">
+        <SetupStepCard
+          icon={<FileCheck2 className="h-4 w-4" />}
+          title="Symphonia files"
+          description={
+            filesReady
+              ? "Tasks, reviews, decisions, and summaries have a place in this repository."
+              : "Create the repository files Symphonia uses for durable work."
+          }
+          ready={filesReady}
+          action={
+            filesReady ? null : (
+              <button
+                onClick={onCreateFiles}
+                disabled={workspacePending}
+                className="rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {workspacePending ? "Creating..." : "Create files"}
+              </button>
+            )
+          }
+        />
+        <SetupStepCard
+          id="repository-rules-card"
+          icon={<FileCheck2 className="h-4 w-4" />}
+          title="Repository rules"
+          description={
+            rulesReady
+              ? "Review, retry, and pull request rules are configured."
+              : "Choose when Codex asks for review, retries, and opens pull requests."
+          }
+          ready={rulesReady}
+          action={
+            <Link
+              href={`/r/${repoSlug}/workflow`}
+              className="rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted"
+            >
+              {rulesReady ? "Edit rules" : "Choose rules"}
+            </Link>
+          }
+        />
+        <SetupStepCard
+          id="github-connect-card"
+          icon={<Github className="h-4 w-4" />}
+          title="GitHub"
+          description={
+            githubReady
+              ? "This repository can use GitHub branches and pull requests."
+              : "Connect GitHub so Symphonia can prepare review branches."
+          }
+          ready={githubReady}
+          action={
+            githubReady && manageUrl ? (
+              <a
+                href={manageUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted"
+              >
+                Manage
+              </a>
+            ) : installUrl ? (
+              <a
+                href={installUrl}
+                className="rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted"
+              >
+                Connect GitHub
+              </a>
+            ) : (
+              <span className="text-[11px] text-muted-foreground">Unavailable</span>
+            )
+          }
+        />
+        <SetupStepCard
+          id="codex-enable-card"
+          icon={<Power className="h-4 w-4" />}
+          title="Codex"
+          description={
+            codexReady
+              ? "Codex can work on eligible tasks in this repository."
+              : "If Codex is unavailable, finish setup now and enable it later."
+          }
+          ready={codexReady}
+          action={
+            codexReady ? null : (
+              <button
+                onClick={onEnableCodex}
+                disabled={automationPending}
+                className="rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {automationPending ? "Enabling..." : "Enable Codex"}
+              </button>
+            )
+          }
+        />
+      </div>
+    </section>
+  );
+}
+
+function SetupStepCard({
+  id,
+  icon,
+  title,
+  description,
+  ready,
+  action,
+}: {
+  id?: string;
+  icon: ReactNode;
+  title: string;
+  description: string;
+  ready: boolean;
+  action: ReactNode;
+}) {
+  return (
+    <div id={id} className="rounded-md border bg-background p-3">
+      <div className="flex items-start justify-between gap-2">
+        <span
+          className={cn(
+            "grid h-8 w-8 shrink-0 place-items-center rounded-md border",
+            ready
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              : "text-muted-foreground",
+          )}
+        >
+          {ready ? <Check className="h-4 w-4" /> : icon}
+        </span>
+        <span
+          className={cn(
+            "rounded-full border px-1.5 py-0.5 text-[10px]",
+            ready
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              : "text-muted-foreground",
+          )}
+        >
+          {ready ? "Ready" : "Needed"}
+        </span>
+      </div>
+      <h3 className="mt-3 text-sm font-medium">{title}</h3>
+      <p className="mt-1 min-h-10 text-xs leading-5 text-muted-foreground">{description}</p>
+      {action && <div className="mt-3">{action}</div>}
+    </div>
+  );
+}
+
+function withRepoState(url: string | undefined, repoKey: string): string | undefined {
+  if (!url) return undefined;
+
+  try {
+    const next = new URL(url);
+    next.searchParams.set("state", repoKey);
+    return next.toString();
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}state=${encodeURIComponent(repoKey)}`;
+  }
+}
+
 function TaskActionBar({
   task,
   repoSlug,
@@ -858,14 +1131,14 @@ function TaskActionBar({
 function actionsForTask(task: ServiceTask): TaskAction[] {
   switch (task.status) {
     case "todo":
-      return [{ label: "Assign", kind: "coding_assistant_run", primary: true }];
+      return [{ label: "Ask Codex", kind: "coding_assistant_run", primary: true }];
     case "in_progress":
       return task.run && isActiveRun(task.run)
         ? [{ label: "Cancel run", kind: "cancel_run" }]
         : [];
     case "paused":
-      return task.pausedReason === "run_failed"
-        ? [{ label: "Retry", kind: "coding_assistant_run", primary: true }]
+      return task.pausedReason === "run_failed" || task.pausedReason === "blocked_by_setup"
+        ? [{ label: "Retry Codex", kind: "coding_assistant_run", primary: true }]
         : [];
     case "in_review":
       if (task.githubPrState === "open") {
@@ -885,4 +1158,12 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
     case "canceled":
       return [];
   }
+}
+
+function safeMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback;
+
+  return message
+    .replace(/(^|[\s(])\/(?:Users|private|tmp|var|Volumes|home|opt|usr)\/[^\s)]+/g, "$1[local path hidden]")
+    .replace(/\b[A-Z][A-Z0-9_]*(TOKEN|SECRET|KEY|PASSWORD)=\S+/g, "[environment value hidden]");
 }

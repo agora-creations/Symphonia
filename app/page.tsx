@@ -186,7 +186,7 @@ export default function RepositoriesPage() {
       };
 
       if (!res.ok || !payload.repository) {
-        throw new Error(payload.error ?? "Could not open repository workspace");
+        throw new Error(payload.error ?? "Could not open repository");
       }
 
       const openedRepository = payload.repository;
@@ -196,7 +196,7 @@ export default function RepositoriesPage() {
       });
       router.push(`/r/${openedRepository.key.toLowerCase()}/tasks`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not open repository workspace");
+      setError(err instanceof Error ? err.message : "Could not open repository");
     } finally {
       setOpeningGitHubRepo(null);
     }
@@ -240,7 +240,7 @@ export default function RepositoriesPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl p-4 sm:p-6">
+      <main id="repository-picker" className="mx-auto max-w-5xl p-4 sm:p-6">
         {showHero && (
           <Hero connectHref={connectHref} onConnect={openGitHubConnection} />
         )}
@@ -249,7 +249,7 @@ export default function RepositoriesPage() {
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Repositories</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Open a connected workspace to view its tasks, planning, and documents.
+              Open a repository to view its tasks, planning, and documents.
             </p>
           </div>
           <span className="text-xs tabular-nums text-muted-foreground">
@@ -281,7 +281,7 @@ export default function RepositoriesPage() {
               {connectedCount > 0 ? "No matching repositories" : "No repositories connected"}
             </h2>
             <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-              Connect GitHub to bring in your repositories, or explore a demo workspace soon.
+              Connect GitHub to bring in your repositories, or explore a demo repository soon.
             </p>
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
               <button
@@ -298,11 +298,11 @@ export default function RepositoriesPage() {
               </button>
               <button
                 disabled
-                title="Coming soon — demo workspaces are on the way."
+                title="Coming soon — demo repositories are on the way."
                 className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground opacity-60"
               >
                 <Sparkles className="h-4 w-4" />
-                Try a demo workspace
+                Try a demo repository
               </button>
             </div>
           </div>
@@ -334,7 +334,7 @@ export default function RepositoriesPage() {
             {filteredLocalRepositories.length > 0 && (
               <section>
                 <div className="mb-2 flex items-center justify-between">
-                  <h2 className="text-sm font-medium">Local workspaces</h2>
+                  <h2 className="text-sm font-medium">Local repositories</h2>
                   <span className="text-xs tabular-nums text-muted-foreground">
                     {filteredLocalRepositories.length}
                   </span>
@@ -397,14 +397,13 @@ function Hero({
             Plan, build, and ship — with AI that writes the code.
           </h2>
           <p className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Symphonía turns each repository into a calm workspace for tasks, planning, and
-            documents. Hand the work off to Clarise — your AI coding assistant — when you&apos;re
-            ready to ship.
+            Symphonía sets up each repository for tasks, planning, and documents. Hand
+            implementation work to Codex when you&apos;re ready to ship.
           </p>
           <ul className="mt-4 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
             <HeroBullet text="Track tasks on a board or list, scoped to each repository." />
             <HeroBullet text="Break down goals into tasks with built-in AI planning." />
-            <HeroBullet text="Assign tasks to Clarise to draft pull requests automatically." />
+            <HeroBullet text="Ask Codex to work tasks, then review before opening a pull request." />
             <HeroBullet text="Keep docs, decisions, and reviews next to the code." />
           </ul>
         </div>
@@ -425,11 +424,11 @@ function Hero({
         </button>
         <button
           disabled
-          title="Coming soon — demo workspaces are on the way."
+          title="Coming soon — demo repositories are on the way."
           className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border px-3 py-2 text-sm text-muted-foreground opacity-60"
         >
           <Sparkles className="h-4 w-4" />
-          Explore a demo workspace
+          Explore a demo repository
         </button>
       </div>
     </section>
@@ -472,7 +471,7 @@ function GitHubRepositoryCard({
     <div
       role="link"
       tabIndex={0}
-      aria-label={`Open ${fullName} workspace`}
+      aria-label={`Open ${fullName} repository`}
       aria-busy={opening}
       onClick={openWorkspace}
       onKeyDown={openFromKeyboard}
@@ -503,7 +502,7 @@ function GitHubRepositoryCard({
 
       <div className="mt-3 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          {opening ? "Opening workspace..." : "Open workspace"}
+          {opening ? "Opening repository..." : "Open repository"}
           <ChevronRight className="h-3 w-3" />
         </span>
         <div className="flex items-center gap-3">
@@ -547,15 +546,15 @@ function RepositoryCard({
   onRemove: (repository: RepositorySummary) => void;
 }) {
   const workspace = repository.workspace;
-  const folders = workspace?.initialized ? "Present" : "Missing";
-  const workflow = workspace?.workflow.exists ? "Present" : "Missing";
+  const files = workspace?.initialized ? "Ready" : "Missing";
+  const rules = workspace?.workflow.exists ? "Ready" : "Missing";
   const href = `/r/${repository.key.toLowerCase()}/tasks`;
 
   return (
     <div className="group relative rounded-lg border bg-card p-4 transition-colors hover:border-foreground/20">
       <Link
         href={href}
-        aria-label={`Open ${repository.name} workspace`}
+        aria-label={`Open ${repository.name} repository`}
         className="absolute inset-0 z-10 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring"
       />
       <div className="flex items-center gap-3">
@@ -573,7 +572,7 @@ function RepositoryCard({
             <p className="truncate text-[11px] text-muted-foreground">
               {repository.github?.owner && repository.github?.name
                 ? `${repository.github.owner}/${repository.github.name}`
-                : "Local workspace"}
+                : "Local repository"}
             </p>
           </div>
           <ChevronRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
@@ -592,8 +591,8 @@ function RepositoryCard({
 
       <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
         <Stat label="Tasks" value={String(repository.taskCount ?? 0)} />
-        <Stat label="Folders" value={folders} muted={!workspace?.initialized} />
-        <Stat label="Workflow" value={workflow} muted={!workspace?.workflow.exists} />
+        <Stat label="Files" value={files} muted={!workspace?.initialized} />
+        <Stat label="Rules" value={rules} muted={!workspace?.workflow.exists} />
       </dl>
     </div>
   );

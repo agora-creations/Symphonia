@@ -12,11 +12,21 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
   }
 
   @default_steps %{
-    "queued" => "Preparing repository",
-    "running" => "Running Coding Assistant",
-    "completed" => "Writing handoff",
+    "queued" => "Preparing workspace",
+    "running" => "Starting Codex",
+    "completed" => "Ready for review",
     "failed" => "Run failed",
     "canceled" => "Canceled"
+  }
+
+  @display_steps %{
+    "Preparing repository" => "Preparing workspace",
+    "Preparing Codex App Server thread" => "Starting Codex",
+    "Running Coding Assistant" => "Starting Codex",
+    "Detecting changed files" => "Checking changes",
+    "Creating branch" => "Checking changes",
+    "Creating review branch" => "Checking changes",
+    "Writing handoff" => "Writing handoff"
   }
 
   @active_states ~w(queued running)
@@ -33,6 +43,43 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
 
   def label(state), do: Map.get(@labels, state, state)
   def default_step(state), do: Map.get(@default_steps, state, label(state))
+
+  def display_step(%{"state" => "completed"}), do: "Ready for review"
+  def display_step(%{"state" => "failed"}), do: "Run failed"
+  def display_step(%{"state" => "canceled"}), do: "Canceled"
+
+  def display_step(run) when is_map(run) do
+    run
+    |> Map.get("current_step")
+    |> case do
+      step when is_binary(step) -> Map.get(@display_steps, step, step)
+      _ -> default_step(run["state"])
+    end
+  end
+
+  def display_step(_run), do: nil
+
+  def display_message(%{"state" => "queued"}) do
+    "Codex is preparing a clean workspace for this task."
+  end
+
+  def display_message(%{"state" => "running"} = run) do
+    case display_step(run) do
+      "Preparing workspace" -> "Codex is preparing a clean workspace for this task."
+      "Starting Codex" -> "Codex is working from the task brief."
+      "Checking changes" -> "Codex finished its turn and Symphonia is checking the changed files."
+      "Writing handoff" -> "Symphonia is writing a review handoff."
+      _ -> "Codex is working on this task."
+    end
+  end
+
+  def display_message(%{"state" => "completed"}) do
+    "Codex produced a handoff that is ready for review."
+  end
+
+  def display_message(%{"state" => "failed"} = run), do: public_message(run)
+  def display_message(%{"state" => "canceled"} = run), do: public_message(run)
+  def display_message(_run), do: nil
 
   def public_message(%{"state" => "canceled"} = run) do
     run["message"] || "Run canceled. The task is paused. You can retry when ready."

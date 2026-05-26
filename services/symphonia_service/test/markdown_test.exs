@@ -79,4 +79,28 @@ defmodule SymphoniaService.MarkdownTest do
     assert rendered =~ "pull_request:\n    number: 456"
     assert rendered =~ "head_branch: task-branch"
   end
+
+  test "parses and serializes nested validation evidence" do
+    frontmatter = %{
+      "key" => "SYM-4",
+      "title" => "Evidence",
+      "handoff" => %{
+        "summary" => "Ready",
+        "validation_evidence" => [
+          %{
+            "label" => "Build passes",
+            "status" => "not_run",
+            "detail" => "No machine validation evidence was recorded for this expectation."
+          }
+        ]
+      }
+    }
+
+    rendered = Markdown.serialize(frontmatter, "# Evidence\n")
+    parsed = Markdown.parse(rendered)
+
+    assert [evidence] = parsed.frontmatter["handoff"]["validation_evidence"]
+    assert evidence["label"] == "Build passes"
+    assert evidence["status"] == "not_run"
+  end
 end

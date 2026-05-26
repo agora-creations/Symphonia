@@ -28,6 +28,7 @@ defmodule SymphoniaService.HarnessEligibilityTest do
 
     repository = RepositoryRegistry.add(registry_path, %{"path" => repo_path, "key" => "SYM"})
     Workspace.initialize(repository)
+    Workspace.create_workflow_from_template(repository, "review-first")
 
     repository =
       RepositoryRegistry.update(registry_path, "SYM", fn repo ->
@@ -75,15 +76,37 @@ defmodule SymphoniaService.HarnessEligibilityTest do
     assert explanation["code"] == "automation_disabled"
   end
 
-  test "requires Clarise generated tasks from approved milestones", %{
+  test "reports missing workspace folders, automation rules, and GitHub link", %{
+    repository: repository
+  } do
+    [task | _rest] = TaskStore.list_tasks(repository)
+
+    File.rm_rf!(Path.join([repository["path"], "symphonia", "docs"]))
+    workspace_explanation = Eligibility.explain(repository, task)
+    assert workspace_explanation["eligible"] == false
+    assert workspace_explanation["code"] == "workspace_missing"
+
+    File.mkdir_p!(Path.join([repository["path"], "symphonia", "docs"]))
+    File.rm!(Path.join(repository["path"], "WORKFLOW.md"))
+    workflow_explanation = Eligibility.explain(repository, task)
+    assert workflow_explanation["eligible"] == false
+    assert workflow_explanation["code"] == "workflow_missing"
+
+    Workspace.create_workflow_from_template(repository, "review-first")
+    github_explanation = Eligibility.explain(Map.delete(repository, "github"), task)
+    assert github_explanation["eligible"] == false
+    assert github_explanation["code"] == "github_not_linked"
+  end
+
+  test "allows manually created Markdown tasks and validates generated milestone metadata", %{
     registry_path: registry_path,
     repository: repository
   } do
     manual_task = TaskStore.create_task(registry_path, repository, %{"title" => "Manual task"})
 
     manual_explanation = Eligibility.explain(repository, manual_task)
-    assert manual_explanation["eligible"] == false
-    assert manual_explanation["code"] == "not_clarise_generated"
+    assert manual_explanation["eligible"] == true
+    assert manual_explanation["code"] == "eligible"
 
     [generated_task | _rest] = TaskStore.list_tasks(repository)
     unapproved = MilestoneLoop.start(repository, %{"title" => "Not approved"})["milestone"]

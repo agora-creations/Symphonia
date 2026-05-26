@@ -92,7 +92,7 @@ const SPEC_STATUS_LABELS: Record<SpecArtifactStatus, string> = {
  * Notion-like document tree, scoped to one repository.
  *
  * Each section is a category. Docs and Decisions support nested children.
- * Tasks/Projects/Reviews/Run Summaries are flat lists. Automation rules are a
+ * Tasks/Projects/Reviews/Run Summaries are flat lists. Repository rules are a
  * pinned root link.
  */
 export function DocTree({ repoKey, onNew }: Props) {
@@ -192,12 +192,12 @@ export function DocTree({ repoKey, onNew }: Props) {
 
   return (
     <div className="space-y-3 text-[13px]">
-      {/* Automation rules are pinned, not a section. */}
+      {/* Repository rules are pinned, not a section. */}
       <SidebarLink
         href={`/r/${slug}/workflow`}
         active={pathname === `/r/${slug}/workflow`}
         icon={<GitBranch className="h-3.5 w-3.5" />}
-        label="Automation Rules"
+        label="Repository rules"
         right={
           <span className="text-[10px] font-mono text-muted-foreground">root</span>
         }

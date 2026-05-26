@@ -46,6 +46,9 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     previous_workspaces_root = System.get_env("SYMPHONIA_WORKSPACES_ROOT")
     previous_skip_daemon = System.get_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON")
     previous_app_server_command = System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND")
+    previous_standalone_bin = System.get_env("SYMPHONIA_CODEX_APP_SERVER_STANDALONE_BIN")
+    previous_codex_bin = System.get_env("SYMPHONIA_CODEX_BIN")
+    previous_app_server_bin = System.get_env("SYMPHONIA_CODEX_APP_SERVER_BIN")
     previous_requests_file = System.get_env("FAKE_APP_SERVER_REQUESTS_FILE")
     previous_fake_mode = System.get_env("FAKE_APP_SERVER_MODE")
     previous_output_suffix = System.get_env("FAKE_APP_SERVER_OUTPUT_SUFFIX")
@@ -68,6 +71,9 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
       restore_env("SYMPHONIA_WORKSPACES_ROOT", previous_workspaces_root)
       restore_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON", previous_skip_daemon)
       restore_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND", previous_app_server_command)
+      restore_env("SYMPHONIA_CODEX_APP_SERVER_STANDALONE_BIN", previous_standalone_bin)
+      restore_env("SYMPHONIA_CODEX_BIN", previous_codex_bin)
+      restore_env("SYMPHONIA_CODEX_APP_SERVER_BIN", previous_app_server_bin)
       restore_env("FAKE_APP_SERVER_REQUESTS_FILE", previous_requests_file)
       restore_env("FAKE_APP_SERVER_MODE", previous_fake_mode)
       restore_env("FAKE_APP_SERVER_OUTPUT_SUFFIX", previous_output_suffix)
@@ -78,6 +84,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
 
     repository = RepositoryRegistry.add(registry_path, %{"path" => repo_path, "key" => "SYM"})
     Workspace.initialize(repository)
+    Workspace.create_workflow_from_template(repository, "review-first")
 
     InstallationStore.upsert_installation(%{
       "id" => 123,
@@ -149,11 +156,25 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     assert run["workspace_path"] == Path.join([workspaces_root, "sym", "sym-1"])
     assert run["codex_thread_id"] == "thread-fake"
     assert run["turn_id"] == "turn-fake"
-    assert run["curated_summary_path"] =~ "symphonia/run-summaries/sym-1-"
+    assert run["curated_summary_path"] == "symphonia/run-summaries/sym-1-codex-handoff.md"
     assert run["provider_output"]["app_server_events"] != []
     assert task["handoff"]["curatedSummaryPath"] == run["curated_summary_path"]
     assert "app/app-server-output.txt" in task["handoff"]["filesChanged"]
     assert run["curated_summary_path"] in task["handoff"]["filesChanged"]
+    assert task["handoff"]["summary"] == "Fake App Server changed app/app-server-output.txt."
+    assert task["handoff"]["headBranch"] == "symphonia/task/sym-1"
+    assert task["handoff"]["baseBranch"] == "main"
+
+    assert task["handoff"]["nextReviewAction"] ==
+             "Review the changed files and approve them to open a pull request."
+
+    assert [_first_evidence | _rest] = task["handoff"]["validationEvidence"]
+
+    assert Enum.all?(task["handoff"]["validationEvidence"], fn evidence ->
+             evidence["status"] == "not_run" and is_binary(evidence["label"]) and
+               evidence["detail"] ==
+                 "No machine validation evidence was recorded for this expectation."
+           end)
 
     branch_files =
       git_output!([
@@ -178,7 +199,10 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
       ])
 
     assert summary =~ "Raw app-server events remain in the local Symphonía run store."
+    assert summary =~ "## Validation Evidence"
     refute summary =~ "turn/completed"
+    refute summary =~ "thread-fake"
+    refute summary =~ "turn-fake"
 
     requests = JSON.decode!(File.read!(requests_file))
     assert Enum.any?(requests, &(&1["method"] == "thread/start"))
@@ -201,6 +225,96 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     review_branch_explanation = Eligibility.explain(repository, review_blocked_task)
     assert review_branch_explanation["eligible"] == false
     assert review_branch_explanation["code"] == "review_branch_exists"
+  end
+
+  test "created Markdown task can start a Codex App Server-backed run", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    task =
+      TaskStore.create_task(registry_path, repository, %{
+        "title" => "Manual Codex task",
+        "body" => "Create a small app-server output file.",
+        "review_expectations" => [
+          "Changed files match the task request.",
+          "Reviewer can inspect the generated output."
+        ]
+      })
+
+    result = CodingAssistant.start_run(registry_path, repository, task["key"])
+    run = wait_for_run(runs_root, result["run"]["id"], "completed")
+    task = wait_for_task_status(repository, task["key"], "in_review")
+
+    assert run["provider"] == "codex_app_server"
+    assert task["handoff"]["headBranch"] == "symphonia/task/#{String.downcase(task["key"])}"
+    assert "app/app-server-output.txt" in task["handoff"]["filesChanged"]
+    assert length(task["handoff"]["validationEvidence"]) == 2
+  end
+
+  test "missing managed Codex standalone pauses task with clear setup blocker and remains retryable",
+       %{
+         fake_app_server: fake_app_server,
+         registry_path: registry_path,
+         remote_path: remote_path,
+         repository: repository,
+         runs_root: runs_root,
+         workspaces_root: workspaces_root
+       } do
+    missing_bin = Path.join(workspaces_root, "missing-codex-standalone")
+
+    System.delete_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON")
+    System.delete_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND")
+    System.delete_env("SYMPHONIA_CODEX_BIN")
+    System.delete_env("SYMPHONIA_CODEX_APP_SERVER_BIN")
+    System.put_env("SYMPHONIA_CODEX_APP_SERVER_STANDALONE_BIN", missing_bin)
+
+    task =
+      TaskStore.create_task(registry_path, repository, %{
+        "title" => "Manual Codex setup blocker task",
+        "body" => "Create a small app-server output file."
+      })
+
+    result = CodingAssistant.start_run(registry_path, repository, task["key"])
+    run = wait_for_run(runs_root, result["run"]["id"], "failed")
+    blocked_task = wait_for_task_status(repository, task["key"], "paused")
+
+    assert run["message"] == AppServerClient.setup_blocker_message()
+    assert run["error"] == AppServerClient.setup_blocker_message()
+    refute Map.has_key?(run, "workspace_path")
+    refute Map.has_key?(run, "codex_thread_id")
+    refute Map.has_key?(run, "turn_id")
+    refute Map.has_key?(run, "curated_summary_path")
+    assert is_nil(blocked_task["handoff"])
+    assert blocked_task["pausedReason"] == "blocked_by_setup"
+    assert blocked_task["pausedExplanation"] == AppServerClient.setup_blocker_message()
+
+    workspace_path = Path.join([workspaces_root, "sym", String.downcase(task["key"])])
+    refute File.exists?(workspace_path)
+
+    {_, branch_status} =
+      System.cmd("git", [
+        "--git-dir",
+        remote_path,
+        "show-ref",
+        "--verify",
+        "--quiet",
+        "refs/heads/symphonia/task/#{String.downcase(task["key"])}"
+      ])
+
+    assert branch_status != 0
+
+    System.put_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON", "true")
+    System.put_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND", fake_app_server)
+    System.delete_env("SYMPHONIA_CODEX_APP_SERVER_STANDALONE_BIN")
+
+    retry = CodingAssistant.start_run(registry_path, repository, task["key"])
+    retried_run = wait_for_run(runs_root, retry["run"]["id"], "completed")
+    retried_task = wait_for_task_status(repository, task["key"], "in_review")
+
+    assert retried_run["provider"] == "codex_app_server"
+    assert retried_task["handoff"]["headBranch"] ==
+             "symphonia/task/#{String.downcase(task["key"])}"
   end
 
   test "client resumes existing app-server threads", %{

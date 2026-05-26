@@ -4,7 +4,7 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
   """
 
   alias SymphoniaService.TaskStore
-  alias SymphoniaService.CodingAssistant.RunEvents
+  alias SymphoniaService.CodingAssistant.{RunEvents, ValidationEvidence}
 
   def demo_file(task) do
     Path.join(["symphonia", "demo-output", "#{task["key"]}.md"])
@@ -35,11 +35,12 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
       "files_changed" => [file],
       "next_review_action" => "Review the demo output and approve it to open a pull request.",
       "head_branch" => branch["head_branch"],
-      "base_branch" => branch["base_branch"]
+      "base_branch" => branch["base_branch"],
+      "validation_evidence" => ValidationEvidence.from_task(task)
     }
   end
 
-  def build_from_changes(_task, branch, files_changed, summary \\ nil) do
+  def build_from_changes(task, branch, files_changed, summary \\ nil) do
     files_changed = Enum.sort(files_changed)
 
     %{
@@ -47,7 +48,8 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
       "files_changed" => files_changed,
       "next_review_action" => "Review the changed files and approve them to open a pull request.",
       "head_branch" => branch["head_branch"],
-      "base_branch" => branch["base_branch"]
+      "base_branch" => branch["base_branch"],
+      "validation_evidence" => ValidationEvidence.from_task(task)
     }
   end
 
@@ -70,6 +72,8 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
             "state" => run["state"],
             "current_step" => run["current_step"],
             "message" => RunEvents.public_message(run),
+            "display_step" => RunEvents.display_step(run),
+            "display_message" => RunEvents.display_message(run),
             "workspace_path" => run["workspace_path"],
             "codex_thread_id" => run["codex_thread_id"],
             "turn_id" => run["turn_id"],

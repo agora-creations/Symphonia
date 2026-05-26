@@ -207,7 +207,11 @@ defmodule SymphoniaService.CodingAssistantTest do
   } do
     result = CodingAssistant.start_run(registry_path, repository, task["key"])
     wait_for_run(repository, task["key"], result["run"]["id"], "completed")
-    TaskStore.apply_event(repository, task["key"], "approve")
+    approved = TaskStore.apply_event(repository, task["key"], "approve")
+
+    assert approved["reviewApproved"] == true
+    refute approved["githubPr"]
+    refute approved["githubPrState"] == "open"
 
     updated = PullRequests.open_from_task(repository, task["key"])
 
@@ -424,6 +428,7 @@ defmodule SymphoniaService.CodingAssistantTest do
 
     assert detail["run"]["state"] == "running"
     assert detail["run"]["currentStep"] == "Running Coding Assistant"
+    assert detail["run"]["displayStep"] == "Starting Codex"
 
     {200, canceled} =
       http_json(

@@ -10,6 +10,21 @@ interface ValidationError {
   message: string;
 }
 
+const ruleTemplateCopy: Record<string, { label: string; description: string }> = {
+  "review-first": {
+    label: "Review before PR",
+    description: "Codex writes a handoff first. You approve before opening a pull request.",
+  },
+  "simple-pr": {
+    label: "Simple PR flow",
+    description: "Codex prepares work for a pull request after running.",
+  },
+  "persistent-retry": {
+    label: "Retry on failure",
+    description: "Codex retries validation failures before handing work to review.",
+  },
+};
+
 function validate(text: string): ValidationError[] {
   const errors: ValidationError[] = [];
   const lines = text.split("\n");
@@ -63,7 +78,9 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
     })
       .then(async (res) => {
         const payload = (await res.json()) as { workflow?: WorkflowFile; error?: string };
-        if (!res.ok || !payload.workflow) throw new Error(payload.error ?? "Could not load automation rules");
+        if (!res.ok || !payload.workflow) {
+          throw new Error(payload.error ?? "Could not load repository rules");
+        }
         return payload.workflow;
       })
       .then((next) => {
@@ -73,7 +90,9 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
         setDirty(false);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load automation rules");
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not load repository rules");
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -99,13 +118,13 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
       );
       const payload = (await res.json()) as { workflow?: WorkflowFile; error?: string };
       if (!res.ok || !payload.workflow) {
-        throw new Error(payload.error ?? "Could not create automation rules");
+        throw new Error(payload.error ?? "Could not create repository rules");
       }
       setWorkflow(payload.workflow);
       setBody(payload.workflow.body);
       setDirty(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create automation rules");
+      setError(err instanceof Error ? err.message : "Could not create repository rules");
     } finally {
       setPending(null);
     }
@@ -121,12 +140,14 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
         body: JSON.stringify({ body }),
       });
       const payload = (await res.json()) as { workflow?: WorkflowFile; error?: string };
-      if (!res.ok || !payload.workflow) throw new Error(payload.error ?? "Could not save automation rules");
+      if (!res.ok || !payload.workflow) {
+        throw new Error(payload.error ?? "Could not save repository rules");
+      }
       setWorkflow(payload.workflow);
       setBody(payload.workflow.body);
       setDirty(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save automation rules");
+      setError(err instanceof Error ? err.message : "Could not save repository rules");
     } finally {
       setPending(null);
     }
@@ -135,7 +156,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
   if (loading) {
     return (
       <div className="grid h-full place-items-center text-sm text-muted-foreground">
-        Loading automation rules...
+        Loading repository rules...
       </div>
     );
   }
@@ -152,7 +173,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
     return (
       <div className="flex h-full flex-col">
         <header className="border-b px-4 py-2.5 text-sm">
-          <span className="font-semibold">Automation Rules</span>
+          <span className="font-semibold">Repository rules</span>
         </header>
         {error && (
           <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
@@ -161,25 +182,29 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
         )}
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-2xl px-4 py-8">
-            <h2 className="text-lg font-semibold">Automation rules haven&apos;t been set up yet</h2>
+            <h2 className="text-lg font-semibold">Repository rules haven&apos;t been set up yet</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Choose a template to define how Clarise picks up and runs tasks in this repository.
+              Choose when Codex asks for review, retries, and opens pull requests.
             </p>
             <div className="mt-5 grid gap-2 sm:grid-cols-3">
-              {workflow.templates.map((template) => (
-                <button
-                  key={template.id}
-                  onClick={() => createFromTemplate(template.id)}
-                  disabled={pending != null}
-                  className="group rounded-lg border p-3 text-left transition-colors hover:border-foreground/20 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <div className="flex items-center gap-1.5 text-sm font-medium">
-                    <FileCode2 className="h-3.5 w-3.5 text-muted-foreground" />
-                    {template.label}
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{template.description}</p>
-                </button>
-              ))}
+              {workflow.templates.map((template) => {
+                const copy = ruleTemplateCopy[template.id] ?? template;
+                return (
+                  <button
+                    key={template.id}
+                    id={template.id === "review-first" ? "repository-rules-card" : undefined}
+                    onClick={() => createFromTemplate(template.id)}
+                    disabled={pending != null}
+                    className="group rounded-lg border p-3 text-left transition-colors hover:border-foreground/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-1.5 text-sm font-medium">
+                      <FileCode2 className="h-3.5 w-3.5 text-muted-foreground" />
+                      {copy.label}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{copy.description}</p>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -191,7 +216,9 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
         <div className="text-sm">
-          <span className="font-semibold">Automation Rules</span>
+          <span id="repository-rules-card" className="font-semibold">
+            Repository rules
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <span
@@ -238,7 +265,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
               setDirty(true);
             }}
             spellCheck={false}
-            aria-label="Automation rules"
+            aria-label="Repository rules"
             className="min-h-[60svh] w-full resize-y rounded-md border bg-background p-3 font-mono text-[13px] leading-6 outline-none focus:ring-2 focus:ring-ring"
           />
 
@@ -248,7 +275,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
             </h3>
             {errors.length === 0 ? (
               <p className="mt-1.5 text-xs text-muted-foreground">
-                Looks good. Clarise will follow these rules on the next task in {repoKey}.
+                Looks good. Codex will follow these repository rules on the next task in {repoKey}.
               </p>
             ) : (
               <ul className="mt-2 space-y-1.5">

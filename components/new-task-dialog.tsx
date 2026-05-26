@@ -163,7 +163,7 @@ export function NewTaskProvider({
                   <circle cx="7" cy="5" r="2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2 1.5" />
                   <path d="M3 12c0-2.2 1.8-4 4-4s4 1.8 4 4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2 1.5" />
                 </svg>
-                Clarise
+                Codex
               </Pill>
               <Pill disabled title="Coming soon">
                 <svg viewBox="0 0 14 14" className="h-3.5 w-3.5">

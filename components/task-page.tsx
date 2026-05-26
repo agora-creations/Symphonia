@@ -30,6 +30,7 @@ import {
   activeRunPollingTarget,
   isActiveRun,
   reviewHandoffForTask,
+  runDisplayForTask,
   runTimelineForTask,
 } from "@/lib/harness-ui-model";
 
@@ -140,7 +141,7 @@ async function startCodingAssistantRun(
     },
   );
   const data = (await res.json()) as { task?: ServiceTask; error?: string };
-  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not start Clarise");
+  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not start Codex");
   return data.task;
 }
 
@@ -156,7 +157,7 @@ async function fetchCodingAssistantRun(
     { cache: "no-store" },
   );
   const data = (await res.json()) as { run?: CodingAssistantRun; error?: string };
-  if (!res.ok || !data.run) throw new Error(data.error ?? "Could not load Clarise run");
+  if (!res.ok || !data.run) throw new Error(data.error ?? "Could not load Codex run");
   return data.run;
 }
 
@@ -191,7 +192,7 @@ async function cancelCodingAssistantRun(
     { method: "POST" },
   );
   const data = (await res.json()) as { task?: ServiceTask; error?: string };
-  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not cancel Clarise run");
+  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not cancel Codex run");
   return data.task;
 }
 
@@ -289,7 +290,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
         setFeedbackError(null);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load task");
+        if (!cancelled) setError(safeMessage(err, "Could not load task"));
       });
     return () => {
       cancelled = true;
@@ -355,6 +356,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
 
   const pausedReason = pausedReasonLabel(task?.pausedReason);
   const activeRun = task?.run && isActiveRun(task.run) ? task.run : null;
+  const activeRunDisplay = runDisplayForTask({ run: activeRun });
 
   const save = async () => {
     if (!task) return;
@@ -368,7 +370,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       setBody(updated.body);
       setDirty(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save task");
+      setError(safeMessage(err, "Could not save task"));
     } finally {
       setPending(null);
     }
@@ -391,7 +393,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       setBody(updated.body);
       setDirty(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update task");
+      setError(safeMessage(err, "Could not update task"));
     } finally {
       setPending(null);
     }
@@ -424,6 +426,13 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
           : action.kind === "open_pull_request"
           ? await openPullRequest(repoKey, task.key)
           : await refreshPullRequest(repoKey, task.key);
+      if (action.kind === "coding_assistant_run") {
+        window.dispatchEvent(
+          new CustomEvent("symphonia:codexRunStarted", {
+            detail: { repoKey, taskKey: task.key },
+          }),
+        );
+      }
       setTask(updated);
       setEligibility(await fetchEligibility(repoKey, task.key).catch(() => eligibility));
       setRunEvents(updated.run?.timeline ?? runEvents);
@@ -431,7 +440,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       setBody(updated.body);
       setDirty(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update task");
+      setError(safeMessage(err, "Could not update task"));
     } finally {
       setPending(null);
     }
@@ -442,7 +451,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     const trimmed = feedback.trim();
 
     if (!trimmed) {
-      setFeedbackError("Describe what Clarise should fix.");
+      setFeedbackError("Describe what Codex should fix.");
       return;
     }
 
@@ -450,7 +459,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     setError(null);
     setFeedbackError(null);
     setNotice(
-      "Changes requested. Clarise turned your feedback into requested changes and is continuing the task.",
+      "Changes requested. Codex is continuing the task.",
     );
 
     try {
@@ -465,7 +474,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       setFeedback("");
     } catch (err) {
       setNotice(null);
-      setError(err instanceof Error ? err.message : "Could not request changes");
+      setError(safeMessage(err, "Could not request changes"));
     } finally {
       setPending(null);
     }
@@ -511,17 +520,16 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
 
       {(pending === "coding_assistant_run" || activeRun) && (
         <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
-              <span>Clarise is working on this task.</span>
-          {activeRun?.currentStep && (
-            <span className="ml-2 text-foreground">{activeRun.currentStep}</span>
+          <span>Codex is working on this task.</span>
+          {activeRunDisplay.step && (
+            <span className="ml-2 text-foreground">{activeRunDisplay.step}</span>
           )}
         </div>
       )}
 
       {(pending === "request_changes" || notice) && (
         <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
-          {notice ??
-                "Changes requested. Clarise turned your feedback into requested changes and is continuing the task."}
+          {notice ?? "Changes requested. Codex is continuing the task."}
         </div>
       )}
 
@@ -592,6 +600,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
                 ) : (
                   <button
                     key={action.kind === "event" ? action.event : action.kind}
+                    id={action.kind === "coding_assistant_run" ? "ask-codex-button" : undefined}
                     onClick={() => runAction(action)}
                     disabled={pending != null}
                     className={cn(
@@ -639,9 +648,9 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
               <div className="mt-4 rounded-md border bg-card p-3 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-medium">What should Clarise fix?</h2>
+                    <h2 className="text-sm font-medium">What should Codex fix?</h2>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Clarise will turn this into requested changes for the next run.
+                      Codex will continue from this review note.
                     </p>
                   </div>
                   <button
@@ -699,7 +708,12 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
         </main>
 
         <aside className="hidden w-80 shrink-0 overflow-y-auto border-l bg-muted/20 p-3 text-xs md:block">
-          <TaskMeta task={task} eligibility={eligibility} runEvents={runEvents} />
+          <TaskMeta
+            repoKey={repoKey}
+            task={task}
+            eligibility={eligibility}
+            runEvents={runEvents}
+          />
         </aside>
       </div>
     </div>
@@ -707,16 +721,28 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
 }
 
 function TaskMeta({
+  repoKey,
   task,
   eligibility,
   runEvents,
 }: {
+  repoKey: string;
   task: ServiceTask;
   eligibility: TaskEligibilityExplanation | null;
   runEvents: CodingAssistantRunEvent[];
 }) {
   const handoff = reviewHandoffForTask(task);
   const timeline = runTimelineForTask(task, runEvents);
+  const runDisplay = runDisplayForTask(task);
+
+  useEffect(() => {
+    if (!handoff.summary) return;
+    window.dispatchEvent(
+      new CustomEvent("symphonia:taskHandoffViewed", {
+        detail: { repoKey, taskKey: task.key },
+      }),
+    );
+  }, [handoff.summary, repoKey, task.key]);
 
   return (
     <div className="space-y-4">
@@ -725,6 +751,12 @@ function TaskMeta({
           <TaskStatusIcon status={task.status} />
           <span>{TASK_STATUS_LABELS[task.status]}</span>
         </div>
+      </Section>
+      <Section title="Goal">
+        <p className="text-muted-foreground">{task.title}</p>
+      </Section>
+      <Section title="Context">
+        <p className="text-muted-foreground">{taskContext(task)}</p>
       </Section>
       {task.pausedExplanation && (
         <Section title="Paused reason">
@@ -740,10 +772,10 @@ function TaskMeta({
       <Section title="Project">
         <span className="text-muted-foreground">{task.project ?? "No project"}</span>
       </Section>
-              <Section title="Clarise">
+      <Section title="Worker">
         <div className="inline-flex items-center gap-1.5">
           <Sparkles className="h-3 w-3 text-violet-500" />
-          <span>{task.assistant || "Not assigned"}</span>
+          <span>{task.run || task.handoff ? "Codex" : "Not assigned"}</span>
         </div>
       </Section>
       <Section title="Automation">
@@ -766,32 +798,16 @@ function TaskMeta({
         )}
       </Section>
       {task.run && (
-        <Section title="Run">
+        <Section title="Progress">
           <div className="space-y-1 text-muted-foreground">
-            <p className="font-mono text-[11px]">{task.run.id}</p>
-            {task.run.provider && <p>Clarise automation</p>}
             <p>{task.run.label ?? task.run.state}</p>
-            {task.run.currentStep && <p>{task.run.currentStep}</p>}
-            {task.run.message && <p>{task.run.message}</p>}
-            {task.run.workspacePath && (
-              <p className="break-all font-mono text-[11px]">{task.run.workspacePath}</p>
-            )}
-            {(task.run.codexThreadId || task.run.turnId) && (
-              <p className="font-mono text-[11px]">
-                {task.run.codexThreadId ?? "no-thread"} / {task.run.turnId ?? "no-turn"}
-              </p>
-            )}
-            {task.run.reviewBranch && (
-              <p className="break-all font-mono text-[11px]">{task.run.reviewBranch}</p>
-            )}
-            {task.run.curatedSummaryPath && (
-              <p className="break-all font-mono text-[11px]">{task.run.curatedSummaryPath}</p>
-            )}
+            {runDisplay.step && <p>{runDisplay.step}</p>}
+            {runDisplay.message && <p>{runDisplay.message}</p>}
           </div>
         </Section>
       )}
       {timeline.length > 0 && (
-        <Section title="Run timeline">
+        <Section title="Progress timeline">
           <ol className="space-y-2">
             {timeline.map((event, index) => (
               <li key={`${event.at ?? "event"}-${index}`} className="border-l pl-2">
@@ -799,46 +815,64 @@ function TaskMeta({
                 <p className="font-mono text-[10px] text-muted-foreground">
                   {event.at ?? "time not recorded"}
                 </p>
-                {(event.threadId || event.turnId) && (
-                  <p className="font-mono text-[10px] text-muted-foreground">
-                    {event.threadId ?? "no-thread"} / {event.turnId ?? "no-turn"}
-                  </p>
-                )}
               </li>
             ))}
           </ol>
         </Section>
       )}
-      <Section title="Review handoff">
-        {handoff.summary ? (
-          <div className="space-y-2">
-            <p className="text-muted-foreground">{handoff.summary}</p>
-            {handoff.files.length > 0 && (
-              <ul className="space-y-1 font-mono text-[11px] text-muted-foreground">
-                {handoff.files.map((file) => (
-                  <li key={file}>{file}</li>
-                ))}
-              </ul>
-            )}
-            {handoff.branch && (
-              <p className="font-mono text-[11px] text-muted-foreground">
-                {handoff.branch}
-              </p>
-            )}
-            {handoff.curatedSummaryPath && (
-              <p className="break-all font-mono text-[11px] text-muted-foreground">
-                {handoff.curatedSummaryPath}
-              </p>
-            )}
-            {handoff.nextReviewAction && (
-              <p className="text-[11px] text-muted-foreground">
-                Next: {handoff.nextReviewAction}
-              </p>
-            )}
-          </div>
+      <Section title="Proof needed">
+        {handoff.proofNeeded.length > 0 ? (
+          <ul className="space-y-1 text-muted-foreground">
+            {handoff.proofNeeded.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
         ) : (
-          <span className="text-muted-foreground">No handoff yet</span>
+          <span className="text-muted-foreground">No proof checklist recorded</span>
         )}
+      </Section>
+      <Section id={handoff.summary ? "review-handoff-panel" : undefined} title="Handoff summary">
+        <span className="text-muted-foreground">{handoff.summary ?? "No handoff yet"}</span>
+      </Section>
+      {handoff.branch && (
+        <Section title="Branch">
+          <p className="font-mono text-[11px] text-muted-foreground">{handoff.branch}</p>
+        </Section>
+      )}
+      <Section title="Files changed">
+        {handoff.files.length > 0 ? (
+          <ul className="space-y-1 font-mono text-[11px] text-muted-foreground">
+            {handoff.files.map((file) => (
+              <li key={file}>{file}</li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-muted-foreground">No files recorded</span>
+        )}
+      </Section>
+      <Section title="Validation evidence">
+        {handoff.validationEvidence.length > 0 ? (
+          <ul className="space-y-2 text-muted-foreground">
+            {handoff.validationEvidence.map((item) => (
+              <li key={item.label} className="space-y-0.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span>{item.label}</span>
+                  <span className={cn("rounded border px-1.5 py-0.5 text-[10px]", evidenceTone(item.status))}>
+                    {validationStatusLabel(item.status)}
+                  </span>
+                </div>
+                <p className="text-[11px]">{item.detail}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-muted-foreground">No validation evidence recorded</span>
+        )}
+      </Section>
+      <Section title="Next action">
+        <span className="text-muted-foreground">
+          {handoff.nextReviewAction ?? "No review action recorded"}
+        </span>
       </Section>
       <Section title="GitHub issue">
         {task.githubIssue ? (
@@ -879,9 +913,55 @@ function TaskMeta({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function taskContext(task: ServiceTask): string {
+  const context = task.body
+    .split(/\n## (Review notes|Handoff history)\b/, 1)[0]
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .slice(0, 2)
+    .join(" ");
+
+  return context || "No additional context recorded.";
+}
+
+function validationStatusLabel(status: string): string {
+  if (status === "passed") return "Passed";
+  if (status === "failed") return "Failed";
+  return "Not run";
+}
+
+function evidenceTone(status: string): string {
+  if (status === "passed") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  }
+
+  if (status === "failed") {
+    return "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300";
+  }
+
+  return "border-muted-foreground/20 bg-background text-muted-foreground";
+}
+
+function safeMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback;
+
+  return message
+    .replace(/(^|[\s(])\/(?:Users|private|tmp|var|Volumes|home|opt|usr)\/[^\s)]+/g, "$1[local path hidden]")
+    .replace(/\b[A-Z][A-Z0-9_]*(TOKEN|SECRET|KEY|PASSWORD)=\S+/g, "[environment value hidden]");
+}
+
+function Section({
+  id,
+  title,
+  children,
+}: {
+  id?: string;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div>
+    <div id={id}>
       <h3 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         {title}
       </h3>
@@ -895,7 +975,7 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
     case "todo":
       return [
         {
-          label: "Assign to Clarise",
+          label: "Ask Codex to work on this task",
           kind: "coding_assistant_run",
           icon: <Sparkles className="h-3.5 w-3.5" />,
           primary: true,
@@ -912,10 +992,13 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
           ]
         : [];
     case "paused":
-      if (task.pausedReason !== "run_failed") return [];
+      if (task.pausedReason !== "run_failed" && task.pausedReason !== "blocked_by_setup") {
+        return [];
+      }
+
       return [
         {
-          label: "Retry with Clarise",
+          label: "Retry with Codex",
           kind: "coding_assistant_run",
           icon: <RotateCcw className="h-3.5 w-3.5" />,
           primary: true,

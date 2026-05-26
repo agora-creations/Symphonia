@@ -3,12 +3,14 @@ defmodule SymphoniaService.CodingAssistant.CuratedSummary do
   Writes review-safe run summaries that can be committed with task branches.
   """
 
-  def write!(repo_path, task, run, files_changed, assistant_summary) do
+  alias SymphoniaService.CodingAssistant.ValidationEvidence
+
+  def write!(repo_path, task, _run, files_changed, assistant_summary) do
     relative_path =
       Path.join([
         "symphonia",
         "run-summaries",
-        "#{slug(task["key"])}-#{slug(run["id"])}.md"
+        "#{slug(task["key"])}-codex-handoff.md"
       ])
 
     full_path = Path.join(repo_path, relative_path)
@@ -16,13 +18,13 @@ defmodule SymphoniaService.CodingAssistant.CuratedSummary do
 
     File.write!(
       full_path,
-      body(task, run, files_changed, assistant_summary)
+      body(task, files_changed, assistant_summary)
     )
 
     relative_path
   end
 
-  defp body(task, run, files_changed, assistant_summary) do
+  defp body(task, files_changed, assistant_summary) do
     summary =
       assistant_summary
       |> to_string()
@@ -41,10 +43,7 @@ defmodule SymphoniaService.CodingAssistant.CuratedSummary do
 
     ## Run
 
-    - Provider: #{run["provider"] || "codex_app_server"}
-    - Run id: #{run["id"]}
-    - Codex thread id: #{run["codex_thread_id"] || "not recorded"}
-    - Turn id: #{run["turn_id"] || "not recorded"}
+    - Worker: Codex
     - Completed at: #{DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()}
 
     ## Summary
@@ -54,6 +53,10 @@ defmodule SymphoniaService.CodingAssistant.CuratedSummary do
     ## Review Files
 
     #{markdown_list(files_changed)}
+
+    ## Validation Evidence
+
+    #{ValidationEvidence.markdown_list(ValidationEvidence.from_task(task))}
 
     ## Evidence Boundary
 

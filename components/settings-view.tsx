@@ -43,7 +43,7 @@ const sections: { id: SectionId; label: string; icon: typeof UserIcon }[] = [
   { id: "profile", label: "Profile", icon: UserIcon },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "workspace", label: "Workspace", icon: Building2 },
+  { id: "workspace", label: "Repository", icon: Building2 },
   { id: "integrations", label: "Integrations", icon: Plug },
   { id: "security", label: "Security", icon: KeyRound },
   { id: "billing", label: "Billing", icon: CreditCard },
@@ -118,7 +118,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
 
         <main className="flex-1 overflow-y-auto p-6 max-w-3xl">
           {active === "profile" && (
-            <Section title="Profile" description="Your name and contact details across the workspace.">
+            <Section title="Profile" description="Your name and contact details across Symphonia.">
               <div className="flex items-center gap-4">
                 <span className="grid h-16 w-16 place-items-center rounded-full bg-rose-500 text-sm font-medium text-white">
                   AM
@@ -236,7 +236,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
           )}
 
           {active === "workspace" && (
-            <Section title="Workspace" description="Settings that apply to the whole repository.">
+            <Section title="Repository" description="Settings that apply to the whole repository.">
               <Field label="Repository alias">
                 <input
                   value={workspaceName}
@@ -245,7 +245,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </Field>
-              <Field label="Workspace URL">
+              <Field label="Repository URL">
                 <div className="flex items-stretch rounded-md border overflow-hidden">
                   <span className="bg-muted px-3 py-1.5 text-xs text-muted-foreground border-r flex items-center">
                     symphonia.app/
@@ -253,7 +253,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   <input
                     defaultValue={repoKey.toLowerCase()}
                     className="flex-1 bg-background px-3 py-1.5 text-sm focus:outline-none"
-                    aria-label="Workspace URL slug"
+                    aria-label="Repository URL slug"
                   />
                 </div>
               </Field>
@@ -275,6 +275,15 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
             >
               <GitHubIntegration repoKey={repoKey} />
               <AutomationIntegration repoKey={repoKey} />
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent("symphonia:onboarding:restart"));
+                }}
+                className="rounded-md border px-3 py-1.5 text-xs hover:bg-accent"
+              >
+                Restart tour
+              </button>
               <IntegrationRow
                 source="linear"
                 name="Linear"
@@ -462,16 +471,16 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
   const lastDecision = daemon?.recentDecisions?.[0];
 
   return (
-    <div className="rounded-md border">
+    <div id="codex-enable-card" className="rounded-md border">
       <div className="flex items-start justify-between gap-3 p-3">
         <div className="flex min-w-0 items-start gap-3">
           <span className="grid h-8 w-8 place-items-center rounded-md bg-muted text-foreground">
             <Bot className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <div className="text-sm font-medium">Clarise Automation</div>
+            <div className="text-sm font-medium">Codex Automation</div>
             <div className="text-xs text-muted-foreground">
-              Automatically assign ready tasks to Clarise, your AI coding assistant.
+              Automatically assign ready tasks to Codex for implementation.
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
               <span
@@ -543,7 +552,7 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
   const manageUrl = connection?.manageUrl ?? connection?.installationUrl;
 
   return (
-    <div className="rounded-md border">
+    <div id="github-connect-card" className="rounded-md border">
       <div className="flex items-start justify-between gap-3 p-3">
         <div className="flex min-w-0 items-start gap-3">
           <span className="grid h-8 w-8 place-items-center rounded-md bg-muted text-foreground">
