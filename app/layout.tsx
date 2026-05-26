@@ -9,9 +9,9 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "Symphonia",
+  title: "Symphonia - Specs to reviewed code",
   description:
-    "Symphonia — repository setup where briefs become merged work.",
+    "Symphonia turns repository-connected specs into planned, executed, and reviewed code.",
 };
 
 export const viewport: Viewport = {

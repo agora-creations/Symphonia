@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     });
   }
 
-  const redirectPath = repoKey ? `/r/${encodeURIComponent(repoKey)}/settings` : "/";
+  const redirectPath = repoKey ? `/r/${encodeURIComponent(repoKey)}/settings` : "/dashboard";
   const redirectUrl = new URL(redirectPath, url.origin);
   redirectUrl.searchParams.set("github", installationId ? "installed" : "install-canceled");
 
