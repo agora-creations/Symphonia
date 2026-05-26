@@ -165,10 +165,10 @@ export function InboxView({ repoKey }: { repoKey: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-3">
         <div className="flex items-center gap-2">
           <InboxIcon className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-semibold">Inbox</span>
+          <span className="text-[15px] font-bold tracking-[-0.02em]">Inbox</span>
           {unread > 0 && (
             <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
               {unread} new
@@ -189,7 +189,7 @@ export function InboxView({ repoKey }: { repoKey: string }) {
             key={t.id}
             onClick={() => setCategory(t.id)}
             className={cn(
-              "rounded-md px-2.5 py-1 text-xs transition-colors whitespace-nowrap",
+              "rounded-[8px] px-2.5 py-1 text-xs transition-colors whitespace-nowrap",
               category === t.id
                 ? "bg-accent text-foreground font-medium"
                 : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -225,8 +225,8 @@ export function InboxView({ repoKey }: { repoKey: string }) {
                     setReadMap((m) => ({ ...m, [n.id]: true }));
                   }}
                   className={cn(
-                    "w-full text-left px-3 py-2.5 flex gap-3 transition-colors",
-                    isActive ? "bg-accent" : "hover:bg-accent/50",
+                    "flex w-full gap-3 border-l-2 px-3 py-2.5 text-left transition-colors",
+                    isActive ? "border-primary bg-accent" : "border-transparent hover:bg-accent/50",
                   )}
                 >
                   <div className="relative shrink-0">
@@ -249,7 +249,7 @@ export function InboxView({ repoKey }: { repoKey: string }) {
                       )}
                       <span
                         className={cn(
-                          "text-xs truncate",
+                          "truncate text-[13px]",
                           isRead ? "text-muted-foreground" : "font-medium",
                         )}
                       >
@@ -285,7 +285,7 @@ export function InboxView({ repoKey }: { repoKey: string }) {
                     type="button"
                     onClick={() => setActiveId(null)}
                     aria-label="Back to inbox"
-                    className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
+                    className="grid h-7 w-7 place-items-center rounded-[8px] text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
                   >
                     <ArrowLeft className="h-3.5 w-3.5" />
                   </button>
@@ -303,7 +303,7 @@ export function InboxView({ repoKey }: { repoKey: string }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button aria-label="Star" disabled title="Coming soon" className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-md text-muted-foreground opacity-60">
+                  <button aria-label="Star" disabled title="Coming soon" className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-[8px] text-muted-foreground opacity-60">
                     <Star
                       className={cn(
                         "h-3.5 w-3.5",
@@ -311,10 +311,10 @@ export function InboxView({ repoKey }: { repoKey: string }) {
                       )}
                     />
                   </button>
-                  <button aria-label="Subscribe" disabled title="Coming soon" className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-md text-muted-foreground opacity-60">
+                  <button aria-label="Subscribe" disabled title="Coming soon" className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-[8px] text-muted-foreground opacity-60">
                     <Bell className="h-3.5 w-3.5" />
                   </button>
-                  <button aria-label="Archive" disabled title="Coming soon" className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-md text-muted-foreground opacity-60">
+                  <button aria-label="Archive" disabled title="Coming soon" className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-[8px] text-muted-foreground opacity-60">
                     <Archive className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -327,7 +327,7 @@ export function InboxView({ repoKey }: { repoKey: string }) {
                   <span className="text-[11px] text-muted-foreground">{active.time} ago</span>
                 </div>
                 <p className="text-sm leading-relaxed">{active.preview}</p>
-                <div className="mt-6 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+                <div className="mt-6 rounded-[10px] border bg-[var(--card-alt)] p-3 text-xs text-muted-foreground">
                   Reply, react, or open the linked work item to continue the thread.
                 </div>
               </div>

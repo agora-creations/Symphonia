@@ -378,7 +378,7 @@ export function CommandPaletteProvider({
             if (e.target === e.currentTarget) close();
           }}
         >
-          <div className="w-full max-w-xl overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl">
+          <div className="w-full max-w-xl overflow-hidden rounded-[10px] border bg-popover text-popover-foreground shadow-2xl">
             <div className="flex items-center gap-2 border-b px-3 py-2.5">
               <Search className="h-4 w-4 text-muted-foreground" />
               <input

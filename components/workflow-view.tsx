@@ -172,8 +172,8 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
   if (!workflow.exists) {
     return (
       <div className="flex h-full flex-col">
-        <header className="border-b px-4 py-2.5 text-sm">
-          <span className="font-semibold">Repository rules</span>
+        <header className="border-b px-5 py-3 text-sm">
+          <span className="text-[15px] font-bold tracking-[-0.02em]">Repository rules</span>
         </header>
         {error && (
           <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
@@ -182,7 +182,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
         )}
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-2xl px-4 py-8">
-            <h2 className="text-lg font-semibold">Repository rules haven&apos;t been set up yet</h2>
+            <h2 className="text-[18px] font-bold tracking-[-0.02em]">Repository rules haven&apos;t been set up yet</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Choose when Codex asks for review, retries, and opens pull requests.
             </p>
@@ -195,7 +195,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
                     id={template.id === "review-first" ? "repository-rules-card" : undefined}
                     onClick={() => createFromTemplate(template.id)}
                     disabled={pending != null}
-                    className="group rounded-lg border p-3 text-left transition-colors hover:border-foreground/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="group rounded-[10px] border bg-card p-3 text-left shadow-[var(--elevation-card)] transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-[var(--elevation-card-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <div className="flex items-center gap-1.5 text-sm font-medium">
                       <FileCode2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -214,9 +214,9 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-3">
         <div className="text-sm">
-          <span id="repository-rules-card" className="font-semibold">
+          <span id="repository-rules-card" className="text-[15px] font-bold tracking-[-0.02em]">
             Repository rules
           </span>
         </div>
@@ -243,7 +243,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
           <button
             onClick={save}
             disabled={!dirty || pending != null}
-            className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-[8px] border px-2.5 py-1 text-xs shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pending === "save" ? "Saving..." : dirty ? "Save changes" : "Saved"}
           </button>
@@ -266,10 +266,10 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
             }}
             spellCheck={false}
             aria-label="Repository rules"
-            className="min-h-[60svh] w-full resize-y rounded-md border bg-background p-3 font-mono text-[13px] leading-6 outline-none focus:ring-2 focus:ring-ring"
+            className="min-h-[60svh] w-full resize-y rounded-[10px] border bg-background p-3 font-mono text-[13px] leading-6 outline-none focus:ring-2 focus:ring-ring"
           />
 
-          <section className="mt-4 rounded-lg border bg-muted/30 p-3">
+          <section className="mt-4 rounded-[10px] border bg-[var(--card-alt)] p-3">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Validation
             </h3>

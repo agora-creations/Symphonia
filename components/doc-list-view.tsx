@@ -48,14 +48,14 @@ export function DocListView({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
         <div className="flex items-center gap-2 text-sm">
-          <span className="font-semibold">{heading}</span>
+          <span className="text-[15px] font-bold tracking-[-0.02em]">{heading}</span>
           <span className="text-muted-foreground tabular-nums">{pages.length}</span>
         </div>
         <button
           onClick={() => startDraft(repoKey, category)}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-2.5 py-1 text-[12px] hover:opacity-90"
+          className="inline-flex items-center gap-1.5 rounded-[8px] bg-primary px-2.5 py-1 text-[12px] text-primary-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-primary-hover"
         >
           <Plus className="h-3.5 w-3.5" /> New {singular}
         </button>
@@ -66,14 +66,14 @@ export function DocListView({
           <p className="mb-5 text-sm text-muted-foreground">{description}</p>
 
           {pages.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-8 text-center">
+            <div className="rounded-[10px] border border-dashed p-8 text-center">
               <p className="text-sm font-medium">No {heading.toLowerCase()} yet</p>
               <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
                 {emptyHint ?? "Create a page to keep this repository's notes, decisions, and reviews in one place."}
               </p>
               <button
                 onClick={() => startDraft(repoKey, category)}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-2.5 py-1 text-[12px] hover:opacity-90"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-[8px] bg-primary px-2.5 py-1 text-[12px] text-primary-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-primary-hover"
               >
                 <Plus className="h-3.5 w-3.5" /> New {singular}
               </button>
@@ -108,7 +108,7 @@ function PageRow({
     <li>
       <Link
         href={`/r/${repoSlug}/${basePath}/${page.id}`}
-        className="block rounded-lg border bg-card px-3 py-2.5 hover:border-foreground/20 transition-colors"
+        className="block rounded-[10px] border bg-card px-3 py-2.5 shadow-[var(--elevation-card)] transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-[var(--elevation-card-hover)]"
       >
         <div className="flex items-start gap-3">
           <span aria-hidden className="text-lg leading-none">

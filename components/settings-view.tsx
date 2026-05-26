@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/components/theme-provider";
 import {
   externalIssues,
   type ExternalIssue,
@@ -51,7 +50,6 @@ const sections: { id: SectionId; label: string; icon: typeof UserIcon }[] = [
 
 export function SettingsView({ repoKey }: { repoKey: string }) {
   const [active, setActive] = useState<SectionId>("integrations");
-  const { theme, toggle } = useTheme();
   const [name, setName] = useState("Ava Martinez");
   const [email, setEmail] = useState("ava@symphonia.app");
   const [bio, setBio] = useState("Design lead, building calmer software.");
@@ -65,8 +63,8 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b px-4 py-2.5">
-        <span className="text-sm font-semibold">Settings</span>
+      <header className="flex items-center justify-between border-b px-5 py-3">
+        <span className="text-[15px] font-bold tracking-[-0.02em]">Settings</span>
         <span className="text-[11px] text-muted-foreground font-mono">{repoKey}</span>
       </header>
 
@@ -80,7 +78,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                 key={s.id}
                 onClick={() => setActive(s.id)}
                 className={cn(
-                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors text-left",
+                  "flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm transition-colors",
                   isActive
                     ? "bg-accent text-foreground font-medium"
                     : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -100,7 +98,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                 key={s.id}
                 onClick={() => setActive(s.id)}
                 className={cn(
-                  "rounded-md px-2.5 py-1 text-xs whitespace-nowrap",
+                  "rounded-[8px] px-2.5 py-1 text-xs whitespace-nowrap",
                   active === s.id
                     ? "bg-accent text-foreground font-medium"
                     : "text-muted-foreground hover:bg-accent/60",
@@ -127,7 +125,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   <button
                     disabled
                     title="Coming soon"
-                    className="cursor-not-allowed rounded-md border px-3 py-1 text-xs opacity-60"
+                    className="cursor-not-allowed rounded-[8px] border px-3 py-1 text-xs opacity-60"
                   >
                     Upload photo
                   </button>
@@ -140,7 +138,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   onChange={(e) => setName(e.target.value)}
                   required
                   maxLength={100}
-                  className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-full rounded-[8px] border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </Field>
               <Field label="Email">
@@ -150,7 +148,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   type="email"
                   required
                   maxLength={200}
-                  className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-full rounded-[8px] border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </Field>
               <Field label="Short bio">
@@ -159,7 +157,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   onChange={(e) => setBio(e.target.value)}
                   rows={3}
                   maxLength={300}
-                  className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                  className="w-full resize-none rounded-[8px] border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </Field>
               <SaveBar />
@@ -167,34 +165,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
           )}
 
           {active === "appearance" && (
-            <Section title="Appearance" description="Tune the look and density of the interface.">
-              <Field label="Theme">
-                <div className="grid grid-cols-2 gap-2 max-w-sm">
-                  {(["light", "dark"] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => {
-                        if (theme !== t) toggle();
-                      }}
-                      className={cn(
-                        "rounded-md border p-3 text-left transition-colors",
-                        theme === t ? "border-primary ring-2 ring-primary/20" : "hover:bg-accent",
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "mb-2 h-12 rounded border",
-                          t === "dark" ? "bg-zinc-900" : "bg-zinc-50",
-                        )}
-                      />
-                      <span className="text-xs capitalize">{t}</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  Tip: you can also toggle the theme from the sidebar.
-                </p>
-              </Field>
+            <Section title="Appearance" description="Tune the density of the dark editorial interface.">
               <ToggleRow
                 label="Compact density"
                 description="Tighter row heights across lists."
@@ -242,11 +213,11 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   value={workspaceName}
                   onChange={(e) => setWorkspaceName(e.target.value)}
                   required maxLength={50}
-                  className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-full rounded-[8px] border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </Field>
               <Field label="Repository URL">
-                <div className="flex items-stretch rounded-md border overflow-hidden">
+                <div className="flex items-stretch overflow-hidden rounded-[8px] border">
                   <span className="bg-muted px-3 py-1.5 text-xs text-muted-foreground border-r flex items-center">
                     symphonia.app/
                   </span>
@@ -260,7 +231,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
               <Field label="Default task prefix">
                 <input
                   defaultValue={repoKey}
-                  className="w-32 rounded-md border bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-32 rounded-[8px] border bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
                   aria-label="Default task prefix"
                 />
               </Field>
@@ -280,7 +251,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent("symphonia:onboarding:restart"));
                 }}
-                className="rounded-md border px-3 py-1.5 text-xs hover:bg-accent"
+                className="rounded-[8px] border px-3 py-1.5 text-xs hover:bg-accent"
               >
                 Restart tour
               </button>
@@ -307,14 +278,14 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                     placeholder="Current password"
                     disabled
                     title="Coming soon"
-                    className="w-full cursor-not-allowed rounded-md border bg-background px-3 py-1.5 text-sm opacity-60 focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="w-full cursor-not-allowed rounded-[8px] border bg-background px-3 py-1.5 text-sm opacity-60 focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   <input
                     type="password"
                     placeholder="New password"
                     disabled
                     title="Coming soon"
-                    className="w-full cursor-not-allowed rounded-md border bg-background px-3 py-1.5 text-sm opacity-60 focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="w-full cursor-not-allowed rounded-[8px] border bg-background px-3 py-1.5 text-sm opacity-60 focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                 </div>
               </Field>
@@ -332,13 +303,13 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
 
           {active === "billing" && (
             <Section title="Billing" description="Manage your plan, seats and invoices.">
-              <div className="rounded-md border p-4">
+              <div className="rounded-[10px] border bg-card p-4 shadow-[var(--elevation-card)]">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-xs uppercase tracking-wider text-muted-foreground">
                       Current plan
                     </div>
-                    <div className="text-lg font-semibold">Business · 12 seats</div>
+                    <div className="text-[18px] font-bold tracking-[-0.02em]">Business · 12 seats</div>
                     <div className="text-xs text-muted-foreground">
                       Renews May 28, 2026 · $192/mo
                     </div>
@@ -346,7 +317,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   <button
                     disabled
                     title="Coming soon"
-                    className="cursor-not-allowed rounded-md border px-3 py-1.5 text-xs opacity-60"
+                    className="cursor-not-allowed rounded-[8px] border px-3 py-1.5 text-xs opacity-60"
                   >
                     Manage plan
                   </button>
@@ -471,10 +442,10 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
   const lastDecision = daemon?.recentDecisions?.[0];
 
   return (
-    <div id="codex-enable-card" className="rounded-md border">
+    <div id="codex-enable-card" className="rounded-[10px] border bg-card shadow-[var(--elevation-card)]">
       <div className="flex items-start justify-between gap-3 p-3">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="grid h-8 w-8 place-items-center rounded-md bg-muted text-foreground">
+          <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-muted text-foreground">
             <Bot className="h-4 w-4" />
           </span>
           <div className="min-w-0">
@@ -485,7 +456,7 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
             <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
               <span
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-md border px-2 py-0.5",
+                  "inline-flex items-center gap-1 rounded-[8px] border px-2 py-0.5",
                   automation?.enabled
                     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                     : "text-muted-foreground",
@@ -494,7 +465,7 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
                 <Power className="h-3 w-3" />
                 {automationLabel(automation)}
               </span>
-              <span className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-muted-foreground">
+              <span className="inline-flex items-center gap-1 rounded-[8px] border px-2 py-0.5 text-muted-foreground">
                 <Activity className="h-3 w-3" />
                 {backgroundServiceLabel(daemon)}
               </span>
@@ -513,7 +484,7 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
           onClick={toggleAutomation}
           disabled={pending || automation == null}
           className={cn(
-            "shrink-0 rounded-md border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+            "shrink-0 rounded-[8px] border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50",
             automation?.enabled
               ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
               : "hover:bg-accent",
@@ -552,10 +523,10 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
   const manageUrl = connection?.manageUrl ?? connection?.installationUrl;
 
   return (
-    <div id="github-connect-card" className="rounded-md border">
+    <div id="github-connect-card" className="rounded-[10px] border bg-card shadow-[var(--elevation-card)]">
       <div className="flex items-start justify-between gap-3 p-3">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="grid h-8 w-8 place-items-center rounded-md bg-muted text-foreground">
+          <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-muted text-foreground">
             <Github className="h-4 w-4" />
           </span>
           <div className="min-w-0">
@@ -580,7 +551,7 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {installed && (
-            <span className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded-[8px] border px-2.5 py-1 text-xs text-muted-foreground">
               <Check className="h-3 w-3" />
               Connected
             </span>
@@ -589,7 +560,7 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
             <a
               href={installUrl}
               rel="noreferrer"
-              className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
+              className="rounded-[8px] border px-2.5 py-1 text-xs hover:bg-accent"
             >
               Connect to GitHub
             </a>
@@ -599,7 +570,7 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
               href={manageUrl}
               target="_blank"
               rel="noreferrer"
-              className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
+              className="rounded-[8px] border px-2.5 py-1 text-xs hover:bg-accent"
             >
               Change selection
             </a>
@@ -664,10 +635,10 @@ function IntegrationRow({
   const Icon = source === "github" ? Github : LinearMark;
 
   return (
-    <div className="rounded-md border">
+    <div className="rounded-[10px] border bg-card shadow-[var(--elevation-card)]">
       <div className="flex items-center justify-between gap-3 p-3">
         <div className="flex items-center gap-3 min-w-0">
-          <span className="grid h-8 w-8 place-items-center rounded-md bg-muted text-foreground">
+          <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-muted text-foreground">
             <Icon className="h-4 w-4" />
           </span>
           <div className="min-w-0">
@@ -679,7 +650,7 @@ function IntegrationRow({
           {connected && items.length > 0 && (
             <button
               onClick={() => setExpanded((v) => !v)}
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] hover:bg-muted"
+              className="inline-flex items-center gap-1 rounded-[8px] border px-2 py-1 text-[11px] hover:bg-accent"
               aria-expanded={expanded}
             >
               {expanded ? (
@@ -693,7 +664,7 @@ function IntegrationRow({
           <button
             onClick={() => setConnected((v) => !v)}
             className={cn(
-              "rounded-md border px-2.5 py-1 text-xs transition-colors",
+              "rounded-[8px] border px-2.5 py-1 text-xs transition-colors",
               connected
                 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                 : "hover:bg-accent",
@@ -711,7 +682,7 @@ function IntegrationRow({
       </div>
 
       {connected && expanded && (
-        <div className="border-t bg-muted/20">
+        <div className="border-t bg-[var(--card-alt)]">
           {items.length === 0 ? (
             <p className="p-4 text-xs text-muted-foreground text-center">
               Nothing new to import. {name} is up to date with this repository.
@@ -762,7 +733,7 @@ function IntegrationRow({
                 <div className="flex items-center gap-1.5">
                   <button
                     disabled title="Coming soon"
-                    className="inline-flex cursor-not-allowed items-center gap-1 rounded-md border px-2 py-1 text-[11px] opacity-60"
+                    className="inline-flex cursor-not-allowed items-center gap-1 rounded-[8px] border px-2 py-1 text-[11px] opacity-60"
                   >
                     <Link2 className="h-3 w-3" /> Link to existing
                   </button>
@@ -772,7 +743,7 @@ function IntegrationRow({
                     title={
                       selected.size === 0 ? "Select items to import" : undefined
                     }
-                    className="rounded-md bg-primary text-primary-foreground px-2.5 py-1 text-[11px] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="rounded-[8px] bg-primary px-2.5 py-1 text-[11px] text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Import {selected.size > 0 ? `${selected.size}` : ""} as task
                     {selected.size === 1 ? "" : "s"}
@@ -798,7 +769,7 @@ function SimpleIntegration({
 }) {
   const [enabled, setEnabled] = useState(initialConnected);
   return (
-    <div className="flex items-center justify-between rounded-md border p-3">
+    <div className="flex items-center justify-between rounded-[10px] border bg-card p-3 shadow-[var(--elevation-card)]">
       <div className="min-w-0">
         <div className="text-sm font-medium">{name}</div>
         <div className="text-xs text-muted-foreground">{desc}</div>
@@ -806,7 +777,7 @@ function SimpleIntegration({
       <button
         onClick={() => setEnabled((v) => !v)}
         className={cn(
-          "rounded-md border px-2.5 py-1 text-xs transition-colors",
+          "rounded-[8px] border px-2.5 py-1 text-xs transition-colors",
           enabled
             ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
             : "hover:bg-accent",
@@ -845,7 +816,7 @@ function Section({
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold">{title}</h2>
+        <h2 className="text-[18px] font-bold tracking-[-0.02em]">{title}</h2>
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
       <div className="space-y-3">{children}</div>
@@ -878,7 +849,7 @@ function ToggleRow({
   disabledReason?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+    <div className="flex items-center justify-between gap-4 rounded-[10px] border bg-card p-3">
       <div className="min-w-0">
         <div className="text-sm font-medium">{label}</div>
         <div className="text-xs text-muted-foreground">{description}</div>
@@ -912,7 +883,7 @@ function SaveBar() {
       <button
         disabled
         title="Coming soon"
-        className="cursor-not-allowed rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground opacity-60"
+        className="cursor-not-allowed rounded-[8px] bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground opacity-60 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
       >
         Save changes
       </button>

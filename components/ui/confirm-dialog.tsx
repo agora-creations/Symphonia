@@ -38,7 +38,7 @@ export function ConfirmDialog({
         <DialogOverlay />
         <DialogPrimitive.Content
           className={cn(
-            "bg-background fixed left-[50%] top-[50%] z-50 w-[calc(100%-2rem)] max-w-md translate-x-[-50%] translate-y-[-50%] rounded-lg border p-5 shadow-2xl",
+            "bg-background fixed left-[50%] top-[50%] z-50 w-[calc(100%-2rem)] max-w-md translate-x-[-50%] translate-y-[-50%] rounded-[10px] border p-5 shadow-[var(--elevation-dialog)]",
             "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95",
           )}
         >
@@ -53,7 +53,7 @@ export function ConfirmDialog({
               type="button"
               onClick={() => onOpenChange(false)}
               disabled={pending}
-              className="rounded-md border px-3 py-1.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-[8px] border px-3 py-1.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
               {cancelLabel}
             </button>
@@ -62,7 +62,7 @@ export function ConfirmDialog({
               onClick={onConfirm}
               disabled={pending}
               className={cn(
-                "rounded-md px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50",
+                "rounded-[8px] px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50",
                 destructive
                   ? "bg-destructive text-destructive-foreground hover:opacity-90"
                   : "bg-primary text-primary-foreground hover:opacity-90",

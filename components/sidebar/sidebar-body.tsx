@@ -90,12 +90,12 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2.5">
         <Link
           href="/" onClick={handleNav} title="Return to all repositories"
-          className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-sidebar-accent"
+          className="flex min-w-0 items-center gap-2 rounded-[8px] px-1.5 py-1 transition-colors hover:bg-sidebar-accent"
         >
           <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-foreground text-xs font-bold text-background">
             S
           </span>
-          <span className="truncate text-sm font-medium">{repo?.name ?? "Symphonía"}</span>
+          <span className="truncate text-[13px] font-medium tracking-[-0.01em]">{repo?.name ?? "Symphonía"}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </Link>
         <div className="flex items-center gap-0.5">
@@ -103,7 +103,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
             onClick={() => palette.open()}
             aria-label="Search and run commands (Cmd+K)"
             title="Search and run commands (⌘K)"
-            className="grid h-7 w-7 place-items-center rounded-md hover:bg-sidebar-accent"
+            className="grid h-7 w-7 place-items-center rounded-[8px] hover:bg-sidebar-accent"
           >
             <Search className="h-3.5 w-3.5" />
           </button>
@@ -114,7 +114,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
             }}
             aria-label="New task"
             title="New task"
-            className="grid h-7 w-7 place-items-center rounded-md hover:bg-sidebar-accent"
+            className="grid h-7 w-7 place-items-center rounded-[8px] hover:bg-sidebar-accent"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -124,7 +124,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
       <div className="flex-1 space-y-3 overflow-y-auto px-2 py-2">
         <Link
           href="/" onClick={handleNav} title="Return to all repositories"
-          className="flex items-center gap-2 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+          className="flex items-center gap-2 rounded-[8px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
         >
           <ArrowLeft className="h-3 w-3" />
           All repositories
@@ -132,7 +132,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
 
         <button
           onClick={() => palette.open()}
-          className="flex w-full items-center gap-2 rounded-md border bg-background/40 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+          className="flex w-full items-center gap-2 rounded-[8px] border bg-background/40 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
           aria-label="Open command palette"
         >
           <Search className="h-3 w-3" />
@@ -184,7 +184,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
         </nav>
 
         <div>
-          <div className="mb-1 px-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="mb-1 px-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
             Documents
           </div>
           <DocTree
@@ -218,7 +218,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
 
         <div>
           <div className="mb-1 flex items-center justify-between px-2">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Repositories
             </span>
             <Link
@@ -242,7 +242,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
                   onClick={handleNav}
                   title={`Open ${t.name}`}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1 text-[13px] transition-colors",
+                    "flex w-full items-center gap-2 rounded-[8px] px-2 py-1 text-[13px] transition-colors",
                     active
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
@@ -298,7 +298,7 @@ function NavLink({
       onClick={onNavigate}
       title={title}
       className={cn(
-        "flex items-center gap-2 rounded-md px-1.5 py-1 text-[13px] transition-colors",
+        "flex items-center gap-2 rounded-[8px] px-1.5 py-1 text-[13px] transition-colors",
         active
           ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
           : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",

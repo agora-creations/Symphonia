@@ -90,7 +90,7 @@ export function NewTaskProvider({
           <DialogPrimitive.Content
             className={cn(
               "bg-background fixed top-[50%] left-[50%] z-50 w-[calc(100%-2rem)] max-w-2xl translate-x-[-50%] translate-y-[-50%]",
-              "rounded-lg border shadow-2xl",
+              "rounded-[10px] border shadow-[var(--elevation-dialog)]",
               "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95",
             )}
           >
@@ -98,7 +98,7 @@ export function NewTaskProvider({
 
             <div className="flex items-center justify-between px-3 py-2 border-b">
               <div className="flex items-center gap-1.5 text-xs">
-                <span className="grid h-5 w-5 place-items-center rounded bg-indigo-500/20 text-indigo-400 text-[10px] font-bold">
+                <span className="grid h-5 w-5 place-items-center rounded bg-primary/20 text-primary text-[10px] font-bold">
                   {repoKey[0] ?? "S"}
                 </span>
                 <span className="font-medium">{repoKey}</span>
@@ -139,7 +139,7 @@ export function NewTaskProvider({
                 className="mt-2 w-full resize-none bg-transparent text-sm placeholder:text-muted-foreground/70 outline-none"
               />
               {error && (
-                <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+                <p className="mt-2 rounded-[10px] border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300">
                   {error}
                 </p>
               )}
@@ -199,7 +199,7 @@ export function NewTaskProvider({
                 aria-label="Attach"
                 disabled
                 title="Coming soon"
-                className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-md text-muted-foreground opacity-60"
+                className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-[8px] text-muted-foreground opacity-60"
               >
                 <Paperclip className="h-3.5 w-3.5" />
               </button>
@@ -211,7 +211,7 @@ export function NewTaskProvider({
                     onClick={() => setCreateMore((v) => !v)}
                     className={cn(
                       "relative inline-block h-4 w-7 rounded-full transition-colors",
-                      createMore ? "bg-indigo-500" : "bg-muted",
+                      createMore ? "bg-primary" : "bg-muted",
                     )}
                   >
                     <span
@@ -226,7 +226,7 @@ export function NewTaskProvider({
                 <button
                   onClick={handleCreate}
                   disabled={!title.trim() || pending}
-                  className="rounded-md bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="rounded-[8px] bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {pending ? "Creating…" : "Create task"}
                 </button>

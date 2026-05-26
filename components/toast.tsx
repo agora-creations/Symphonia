@@ -58,7 +58,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={toast.id}
             className={cn(
-              "pointer-events-auto flex min-w-[14rem] max-w-sm items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm shadow-lg",
+              "pointer-events-auto flex min-w-[14rem] max-w-sm items-center gap-2 rounded-[10px] border bg-background px-3 py-2 text-sm shadow-lg",
               "animate-in fade-in-0 slide-in-from-bottom-2 duration-200",
               toast.tone === "success" &&
                 "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",

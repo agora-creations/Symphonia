@@ -29,7 +29,7 @@ export function RepoLayoutClient({
         onAsk={() => setAskClarise((n) => n + 1)}
       >
         <ClariseProvider askPing={askClarise}>
-          <div className="flex min-h-svh w-full bg-background text-foreground">
+          <div className="flex min-h-svh w-full flex-col bg-background text-foreground lg:flex-row">
             <AppSidebar repoKey={repoKey} />
             <main className="flex min-w-0 flex-1 flex-col">
               <div className="flex-1 overflow-auto">{children}</div>

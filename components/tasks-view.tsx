@@ -236,7 +236,7 @@ function TaskCard({
   const harnessStatus = harnessStatusForTask(task, eligibility);
   const activeRunDisplay = runDisplayForTask({ run: activeRun });
   return (
-    <article className="rounded-md border bg-card p-2.5 text-card-foreground shadow-sm transition-colors hover:border-foreground/20">
+    <article className="rounded-[10px] border bg-card p-2.5 text-card-foreground shadow-[var(--elevation-card)] transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-[var(--elevation-card-hover)]">
       <Link href={`/r/${repoSlug}/tasks/${encodeURIComponent(task.key)}`} className="block">
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
           <PriorityIcon priority={task.priority} />
@@ -313,7 +313,7 @@ function TaskRow({
   const harnessStatus = harnessStatusForTask(task, eligibility);
   const activeRunDisplay = runDisplayForTask({ run: activeRun });
   return (
-    <div className="grid grid-cols-[1.5rem_4.5rem_1fr_auto] items-center gap-3 border-b px-4 py-2 last:border-b-0 hover:bg-muted/40">
+    <div className="grid grid-cols-[1.5rem_4.5rem_1fr_auto] items-center gap-3 border-b px-4 py-2 last:border-b-0 hover:bg-accent">
       <Link
         href={`/r/${repoSlug}/tasks/${encodeURIComponent(task.key)}`}
         className="contents"
@@ -635,9 +635,9 @@ export function TasksView({ repoKey }: { repoKey: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
         <div className="flex items-center gap-2 text-sm">
-          <span className="font-semibold">Tasks</span>
+          <span className="text-[15px] font-bold tracking-[-0.02em]">Tasks</span>
           <span className="text-muted-foreground tabular-nums">{filtered.length}</span>
           <span
             className={cn(
@@ -657,12 +657,12 @@ export function TasksView({ repoKey }: { repoKey: string }) {
           )}
         </div>
         <div className="flex items-center gap-1">
-          <div className="flex items-center rounded-md border p-0.5" role="group" aria-label="View mode">
+          <div className="flex items-center rounded-[8px] border p-0.5" role="group" aria-label="View mode">
             <button
               onClick={() => setMode("board")}
               aria-pressed={view === "board"}
               className={cn(
-                "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px]",
+                "inline-flex items-center gap-1 rounded-[8px] px-1.5 py-0.5 text-[12px]",
                 view === "board" ? "bg-muted text-foreground" : "text-muted-foreground",
               )}
             >
@@ -672,7 +672,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
               onClick={() => setMode("list")}
               aria-pressed={view === "list"}
               className={cn(
-                "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px]",
+                "inline-flex items-center gap-1 rounded-[8px] px-1.5 py-0.5 text-[12px]",
                 view === "list" ? "bg-muted text-foreground" : "text-muted-foreground",
               )}
             >
@@ -683,7 +683,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
             value={priority}
             onChange={(e) => setPriority(e.target.value as Priority | "all")}
             aria-label="Filter by priority"
-            className="rounded-md border bg-background px-2 py-1 text-[12px]"
+            className="rounded-[8px] border bg-background px-2 py-1 text-[12px]"
           >
             <option value="all">All priorities</option>
             {PRIORITIES.map((p) => (
@@ -695,21 +695,21 @@ export function TasksView({ repoKey }: { repoKey: string }) {
           <button
             disabled
             title="Coming soon"
-            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] text-muted-foreground opacity-60"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-[8px] border px-2 py-1 text-[12px] text-muted-foreground opacity-60"
           >
             <Filter className="h-3.5 w-3.5" /> Filter
           </button>
           <button
             disabled
             title="Coming soon"
-            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] text-muted-foreground opacity-60"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-[8px] border px-2 py-1 text-[12px] text-muted-foreground opacity-60"
           >
             <SlidersHorizontal className="h-3.5 w-3.5" /> Display
           </button>
           <button
             id="create-first-task-button"
             onClick={() => newTask.open()}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-2 py-1 text-[12px] hover:opacity-90"
+            className="inline-flex items-center gap-1.5 rounded-[8px] bg-primary px-2 py-1 text-[12px] text-primary-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-primary-hover"
           >
             <Plus className="h-3.5 w-3.5" /> New task
           </button>
@@ -752,13 +752,13 @@ export function TasksView({ repoKey }: { repoKey: string }) {
             <div className="flex shrink-0 flex-wrap gap-2">
               <Link
                 href={`/r/${repoSlug}/workspace`}
-                className="rounded-md border bg-background px-2 py-1 text-xs hover:bg-muted"
+                className="rounded-[8px] border bg-background px-2 py-1 text-xs hover:bg-accent"
               >
                 Back to planning
               </Link>
               <button
                 onClick={clearSourceMilestone}
-                className="rounded-md border bg-background px-2 py-1 text-xs hover:bg-muted"
+                className="rounded-[8px] border bg-background px-2 py-1 text-xs hover:bg-accent"
               >
                 Show all tasks
               </button>
@@ -777,7 +777,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
             {TASK_STATUS_ORDER.map((s) => (
               <div
                 key={s}
-                className="flex w-72 shrink-0 flex-col rounded-lg border bg-muted/30"
+                className="flex w-72 shrink-0 flex-col rounded-[10px] border bg-[var(--card-alt)]"
                 role="list"
                 aria-label={`${TASK_STATUS_LABELS[s]} (${grouped[s].length})`}
               >
@@ -790,7 +790,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
                   <button
                     onClick={() => newTask.open()}
                     aria-label={`New task in ${TASK_STATUS_LABELS[s]}`}
-                    className="ml-auto grid h-5 w-5 place-items-center rounded hover:bg-background text-muted-foreground"
+                    className="ml-auto grid h-5 w-5 place-items-center rounded-[8px] text-muted-foreground hover:bg-background"
                   >
                     <Plus className="h-3 w-3" />
                   </button>
@@ -807,7 +807,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
                     />
                   ))}
                   {grouped[s].length === 0 && (
-                    <div className="rounded-md border border-dashed p-3 text-center text-[11px] text-muted-foreground">
+                    <div className="rounded-[10px] border border-dashed p-3 text-center text-[11px] text-muted-foreground">
                       Tasks are units of work. Create one, or connect GitHub to import issues.
                     </div>
                   )}
@@ -821,7 +821,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
           {TASK_STATUS_ORDER.map((s) =>
             grouped[s].length === 0 ? null : (
               <section key={s} className="border-b last:border-b-0">
-                <div className="flex items-center gap-2 px-4 py-2 bg-muted/30">
+                <div className="flex items-center gap-2 bg-[var(--card-alt)] px-4 py-2">
                   <TaskStatusIcon status={s} />
                   <span className="text-sm font-medium">{TASK_STATUS_LABELS[s]}</span>
                   <span className="text-[11px] text-muted-foreground tabular-nums">
@@ -881,12 +881,12 @@ function RepositorySetupStatus({
     <section
       id="repository-setup-status"
       data-repository-ready={baseReady ? "true" : "false"}
-      className="border-b bg-muted/20 px-4 py-3"
+    className="border-b bg-[var(--card-alt)] px-4 py-3"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-semibold">Repository setup</h2>
+            <h2 className="text-[15px] font-bold tracking-[-0.02em]">Repository setup</h2>
             <span
               className={cn(
                 "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
@@ -923,7 +923,7 @@ function RepositorySetupStatus({
               <button
                 onClick={onCreateFiles}
                 disabled={workspacePending}
-                className="rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-[8px] border bg-background px-2 py-1 text-[11px] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {workspacePending ? "Creating..." : "Create files"}
               </button>
@@ -943,7 +943,7 @@ function RepositorySetupStatus({
           action={
             <Link
               href={`/r/${repoSlug}/workflow`}
-              className="rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted"
+              className="rounded-[8px] border bg-background px-2 py-1 text-[11px] hover:bg-accent"
             >
               {rulesReady ? "Edit rules" : "Choose rules"}
             </Link>
@@ -965,14 +965,14 @@ function RepositorySetupStatus({
                 href={manageUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted"
+                className="rounded-[8px] border bg-background px-2 py-1 text-[11px] hover:bg-accent"
               >
                 Manage
               </a>
             ) : installUrl ? (
               <a
                 href={installUrl}
-                className="rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted"
+                className="rounded-[8px] border bg-background px-2 py-1 text-[11px] hover:bg-accent"
               >
                 Connect GitHub
               </a>
@@ -996,7 +996,7 @@ function RepositorySetupStatus({
               <button
                 onClick={onEnableCodex}
                 disabled={automationPending}
-                className="rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-[8px] border bg-background px-2 py-1 text-[11px] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {automationPending ? "Enabling..." : "Enable Codex"}
               </button>
@@ -1024,11 +1024,11 @@ function SetupStepCard({
   action: ReactNode;
 }) {
   return (
-    <div id={id} className="rounded-md border bg-background p-3">
+    <div id={id} className="rounded-[10px] border bg-card p-3 shadow-[var(--elevation-card)]">
       <div className="flex items-start justify-between gap-2">
         <span
           className={cn(
-            "grid h-8 w-8 shrink-0 place-items-center rounded-md border",
+            "grid h-8 w-8 shrink-0 place-items-center rounded-[8px] border",
             ready
               ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
               : "text-muted-foreground",

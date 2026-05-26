@@ -53,7 +53,7 @@ function ProjectRow({
   props: Record<PropertyKey, boolean>;
 }) {
   return (
-    <div className="group grid grid-cols-[1.5rem_1fr_auto] items-center gap-3 px-4 py-2 border-b last:border-b-0 hover:bg-muted/40 transition-colors cursor-pointer">
+    <div className="group grid cursor-pointer grid-cols-[1.5rem_1fr_auto] items-center gap-3 border-b px-4 py-2 transition-colors last:border-b-0 hover:bg-accent">
       <StatusIcon status={p.status} />
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-[11px] tabular-nums text-muted-foreground shrink-0 w-16">
@@ -111,7 +111,7 @@ function ProjectCard({
   props: Record<PropertyKey, boolean>;
 }) {
   return (
-    <div className="rounded-lg border bg-card p-3 hover:bg-muted/40 transition-colors cursor-pointer space-y-2">
+    <div className="cursor-pointer space-y-2 rounded-[10px] border bg-card p-3 shadow-[var(--elevation-card)] transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-[var(--elevation-card-hover)]">
       <div className="flex items-center gap-2">
         <StatusIcon status={p.status} />
         <span className="text-[11px] tabular-nums text-muted-foreground">{p.key}</span>
@@ -473,9 +473,9 @@ export function ProjectsView({ repoKey }: { repoKey: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
         <div className="flex items-center gap-2 text-sm">
-          <span className="font-semibold">Projects</span>
+          <span className="text-[15px] font-bold tracking-[-0.02em]">Projects</span>
           <span className="text-muted-foreground tabular-nums">{filtered.length}</span>
         </div>
         <div className="flex items-center gap-1">
@@ -483,7 +483,7 @@ export function ProjectsView({ repoKey }: { repoKey: string }) {
             value={priority}
             onChange={(e) => setPriority(e.target.value as Priority | "all")}
             aria-label="Filter by priority"
-            className="rounded-md border bg-background px-2 py-1 text-[12px]"
+            className="rounded-[8px] border bg-background px-2 py-1 text-[12px]"
           >
             <option value="all">All priorities</option>
             {PRIORITIES.map((p) => (
@@ -496,7 +496,7 @@ export function ProjectsView({ repoKey }: { repoKey: string }) {
             value={health}
             onChange={(e) => setHealth(e.target.value as Health | "all")}
             aria-label="Filter by health"
-            className="rounded-md border bg-background px-2 py-1 text-[12px]"
+            className="rounded-[8px] border bg-background px-2 py-1 text-[12px]"
           >
             <option value="all">All health</option>
             {HEALTHS.map((h) => (
@@ -508,13 +508,13 @@ export function ProjectsView({ repoKey }: { repoKey: string }) {
           <button
             disabled
             title="Coming soon"
-            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] text-muted-foreground opacity-60"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-[8px] border px-2 py-1 text-[12px] text-muted-foreground opacity-60"
           >
             <Filter className="h-3.5 w-3.5" /> Filter
           </button>
           <Popover>
             <PopoverTrigger asChild>
-              <button className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] hover:bg-muted">
+              <button className="inline-flex items-center gap-1.5 rounded-[8px] border px-2 py-1 text-[12px] hover:bg-accent">
                 <SlidersHorizontal className="h-3.5 w-3.5" /> Display
               </button>
             </PopoverTrigger>
@@ -535,7 +535,7 @@ export function ProjectsView({ repoKey }: { repoKey: string }) {
           <button
             disabled
             title="Coming soon"
-            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-[12px] text-primary-foreground opacity-60"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-[8px] bg-primary px-2 py-1 text-[12px] text-primary-foreground opacity-60"
           >
             <Plus className="h-3.5 w-3.5" /> New project
           </button>
@@ -568,7 +568,7 @@ export function ProjectsView({ repoKey }: { repoKey: string }) {
             <section key={k} className="border-b last:border-b-0">
               <button
                 onClick={() => toggle(k)}
-                className="w-full flex items-center gap-2 px-4 py-2 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+                className="flex w-full items-center gap-2 bg-[var(--card-alt)] px-4 py-2 text-left transition-colors hover:bg-accent"
               >
                 <ChevronDown
                   className={cn(

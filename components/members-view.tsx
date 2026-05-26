@@ -32,9 +32,9 @@ export function MembersView({ repoKey }: { repoKey: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
         <div className="flex items-center gap-2 text-sm">
-          <span className="font-semibold">Members</span>
+          <span className="text-[15px] font-bold tracking-[-0.02em]">Members</span>
           <span className="text-muted-foreground tabular-nums">{list.length}</span>
         </div>
         <div className="flex items-center gap-1">
@@ -45,14 +45,14 @@ export function MembersView({ repoKey }: { repoKey: string }) {
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search members"
               aria-label="Search members"
-              className="rounded-md border bg-background pl-7 pr-2 py-1 text-[12px] w-40 focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-40 rounded-[8px] border bg-background py-1 pl-7 pr-2 text-[12px] focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
           <select
             value={role}
             onChange={(e) => setRole(e.target.value as Role | "all")}
             aria-label="Filter by role"
-            className="rounded-md border bg-background px-2 py-1 text-[12px]"
+            className="rounded-[8px] border bg-background px-2 py-1 text-[12px]"
           >
             <option value="all">All roles</option>
             <option value="Admin">Admin</option>
@@ -62,7 +62,7 @@ export function MembersView({ repoKey }: { repoKey: string }) {
           <button
             disabled
             title="Coming soon"
-            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-[12px] text-primary-foreground opacity-60"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-[8px] bg-primary px-2 py-1 text-[12px] text-primary-foreground opacity-60"
           >
             <Plus className="h-3.5 w-3.5" /> Invite
           </button>
@@ -70,7 +70,7 @@ export function MembersView({ repoKey }: { repoKey: string }) {
       </header>
 
       <div className="flex-1 overflow-auto">
-        <div className="hidden md:grid grid-cols-[1fr_8rem_1fr_8rem] gap-4 px-4 py-2 text-[11px] uppercase tracking-wider text-muted-foreground border-b">
+        <div className="hidden grid-cols-[1fr_8rem_1fr_8rem] gap-4 border-b bg-[var(--card-alt)] px-4 py-2 text-[11px] uppercase tracking-wider text-muted-foreground md:grid">
           <span>Name</span>
           <span>Role</span>
           <span>Repositories</span>
@@ -79,7 +79,7 @@ export function MembersView({ repoKey }: { repoKey: string }) {
         {list.map((u) => (
           <div
             key={u.id}
-            className="grid grid-cols-[1fr_auto] md:grid-cols-[1fr_8rem_1fr_8rem] items-center gap-4 px-4 py-2.5 border-b hover:bg-muted/40"
+            className="grid grid-cols-[1fr_auto] items-center gap-4 border-b px-4 py-2.5 hover:bg-accent md:grid-cols-[1fr_8rem_1fr_8rem]"
           >
             <div className="flex items-center gap-2 min-w-0">
               <UserAvatar user={u} size={24} />

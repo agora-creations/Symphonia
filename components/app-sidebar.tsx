@@ -3,9 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Menu, Moon, Sun, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/components/theme-provider";
 import { SidebarBody } from "@/components/sidebar/sidebar-body";
 import type { RepositorySummary } from "@/lib/repository-model";
 
@@ -17,15 +16,14 @@ interface Props {
  * Repository sidebar.
  *
  * - On `lg+` viewports, renders a fixed sidebar to the left of the content.
- * - Below `lg`, renders a sticky top bar (with logo, repo name, theme toggle,
- *   and a hamburger button) plus a slide-over drawer that contains the same
- *   navigation as the desktop sidebar.
+ * - Below `lg`, renders a sticky top bar (with logo, repo name, and a hamburger
+ *   button) plus a slide-over drawer that contains the same navigation as the
+ *   desktop sidebar.
  *
- * The footer (avatar + theme toggle) is rendered at the bottom of both the
- * desktop sidebar and the mobile drawer for consistency.
+ * The footer avatar is rendered at the bottom of both the desktop sidebar and
+ * the mobile drawer for consistency.
  */
 export function AppSidebar({ repoKey }: Props) {
-  const { theme, toggle } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [repo, setRepo] = useState<RepositorySummary | null>(null);
   const pathname = usePathname();
@@ -101,15 +99,6 @@ export function AppSidebar({ repoKey }: Props) {
             <span className="truncate text-sm font-medium">{repoName}</span>
           </Link>
         </div>
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label="Toggle theme"
-          title={theme === "dark" ? "Switch to light" : "Switch to dark"}
-          className="grid h-8 w-8 place-items-center rounded-md border text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-        </button>
       </header>
 
       {/* Mobile drawer */}
@@ -140,7 +129,7 @@ export function AppSidebar({ repoKey }: Props) {
             <div className="flex-1 overflow-hidden">
               <SidebarBody repoKey={repoKey} onNavigate={() => setMobileOpen(false)} />
             </div>
-            <SidebarFooter theme={theme} toggle={toggle} />
+            <SidebarFooter />
           </aside>
         </div>
       )}
@@ -150,13 +139,13 @@ export function AppSidebar({ repoKey }: Props) {
         <div className="flex flex-1 flex-col overflow-hidden">
           <SidebarBody repoKey={repoKey} />
         </div>
-        <SidebarFooter theme={theme} toggle={toggle} />
+        <SidebarFooter />
       </aside>
     </>
   );
 }
 
-function SidebarFooter({ theme, toggle }: { theme: "light" | "dark"; toggle: () => void }) {
+function SidebarFooter() {
   return (
     <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
       <button
@@ -169,14 +158,6 @@ function SidebarFooter({ theme, toggle }: { theme: "light" | "dark"; toggle: () 
           AM
         </span>
         <span className="text-sm">Ava Martinez</span>
-      </button>
-      <button
-        onClick={toggle}
-        aria-label="Toggle theme"
-        title={theme === "dark" ? "Switch to light" : "Switch to dark"}
-        className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-      >
-        {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
       </button>
     </div>
   );
