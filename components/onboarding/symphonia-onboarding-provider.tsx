@@ -1,18 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Onborda, OnbordaProvider as OnbordaRootProvider, useOnborda } from "onborda";
 import type { CardComponentProps, Step } from "onborda";
-import { ArrowLeft, ArrowRight, Check, GitBranch, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "symphonia.onboarding.v1";
 
-type TourName = "first-repository-setup" | "first-task" | "first-codex-review";
+type TourName = "first-task" | "first-codex-review";
 
 interface RepoOnboardingState {
-  hasSeenRepositorySetupTour: boolean;
   hasCreatedFirstTask: boolean;
   hasStartedFirstCodexRun: boolean;
   hasReviewedFirstHandoff: boolean;
@@ -20,9 +19,6 @@ interface RepoOnboardingState {
 }
 
 interface OnboardingState {
-  global: {
-    hasSeenIntroTour: boolean;
-  };
   repos: Record<string, RepoOnboardingState>;
 }
 
@@ -37,78 +33,15 @@ type OnbordaTour = {
 };
 
 const emptyRepoState: RepoOnboardingState = {
-  hasSeenRepositorySetupTour: false,
   hasCreatedFirstTask: false,
   hasStartedFirstCodexRun: false,
   hasReviewedFirstHandoff: false,
   dismissedTours: {},
 };
 
-const defaultState: OnboardingState = {
-  global: {
-    hasSeenIntroTour: false,
-  },
-  repos: {},
-};
+const defaultState: OnboardingState = { repos: {} };
 
 const tours: OnbordaTour[] = [
-  {
-    tour: "first-repository-setup",
-    steps: [
-      {
-        icon: <GitBranch className="h-3.5 w-3.5" />,
-        title: "Choose a repository",
-        content:
-          "Pick the repository where Symphonia should keep tasks, reviews, decisions, and run summaries.",
-        selector: "#repository-picker",
-        side: "bottom",
-        pointerPadding: 12,
-        pointerRadius: 12,
-        blockNextUntilSelector: "#repository-setup-status",
-        blockNextReason: "Open a repository to continue setup.",
-      } satisfies SymphoniaStep,
-      {
-        icon: <Check className="h-3.5 w-3.5" />,
-        title: "Repository setup",
-        content:
-          "This single checklist covers Symphonia files, repository rules, GitHub, and Codex readiness.",
-        selector: "#repository-setup-status",
-        side: "bottom-left",
-        pointerPadding: 10,
-        pointerRadius: 10,
-      },
-      {
-        icon: <Check className="h-3.5 w-3.5" />,
-        title: "Repository rules",
-        content:
-          "Rules tell Codex when to ask for review, when to retry, and when a pull request may be opened.",
-        selector: "#repository-rules-card",
-        side: "bottom",
-        pointerPadding: 10,
-        pointerRadius: 10,
-      },
-      {
-        icon: <Check className="h-3.5 w-3.5" />,
-        title: "GitHub connection",
-        content:
-          "GitHub lets Symphonia create review branches and open pull requests only after your approval.",
-        selector: "#github-connect-card",
-        side: "bottom",
-        pointerPadding: 10,
-        pointerRadius: 10,
-      },
-      {
-        icon: <Check className="h-3.5 w-3.5" />,
-        title: "Codex readiness",
-        content:
-          "Codex can be enabled after repository setup. If it is unavailable, finish setup now and enable Codex later.",
-        selector: "#codex-enable-card",
-        side: "bottom-right",
-        pointerPadding: 10,
-        pointerRadius: 10,
-      },
-    ],
-  },
   {
     tour: "first-task",
     steps: [
@@ -163,9 +96,6 @@ function readState(): OnboardingState {
     if (!raw) return defaultState;
     const parsed = JSON.parse(raw) as Partial<OnboardingState>;
     return {
-      global: {
-        hasSeenIntroTour: Boolean(parsed.global?.hasSeenIntroTour),
-      },
       repos: Object.fromEntries(
         Object.entries(parsed.repos ?? {}).map(([key, value]) => [
           key.toUpperCase(),
@@ -218,11 +148,6 @@ function waitForSelector(selector: string, callback: () => void): () => void {
   };
 }
 
-function isRepoReadyForFirstTask(): boolean {
-  const setup = document.querySelector("#repository-setup-status");
-  return setup?.getAttribute("data-repository-ready") === "true";
-}
-
 export function SymphoniaOnboardingProvider({ children }: { children: ReactNode }) {
   return (
     <OnbordaRootProvider>
@@ -247,7 +172,6 @@ function OnboardingSurface({ children }: { children: ReactNode }) {
 
 function OnboardingController({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   const { currentStep, currentTour, isOnbordaVisible, startOnborda, setCurrentStep, closeOnborda } =
     useOnborda();
   const [state, setState] = useState<OnboardingState>(defaultState);
@@ -308,30 +232,15 @@ function OnboardingController({ children }: { children: ReactNode }) {
     if (!loaded || isOnbordaVisible || startLock.current) return;
 
     const repoKey = repoKeyFromPath(pathname);
-    if (!repoKey) {
-      if (!state.global.hasSeenIntroTour && selectorExists("#repository-picker")) {
-        startTourAt("first-repository-setup", 0);
-      }
-      return;
-    }
+    if (!repoKey) return;
 
     const repo = repoState(state, repoKey);
     const dismissed = repo.dismissedTours ?? {};
 
     if (
-      !repo.hasSeenRepositorySetupTour &&
-      !dismissed["first-repository-setup"] &&
-      selectorExists("#repository-setup-status")
-    ) {
-      startTourAt("first-repository-setup", 1);
-      return;
-    }
-
-    if (
       !repo.hasCreatedFirstTask &&
       !dismissed["first-task"] &&
-      selectorExists("#create-first-task-button") &&
-      isRepoReadyForFirstTask()
+      selectorExists("#create-first-task-button")
     ) {
       startTourAt("first-task", 0);
       return;
@@ -360,7 +269,11 @@ function OnboardingController({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isOnbordaVisible || !currentTour) return;
     const step = queryStep(currentTour, currentStep);
-    if (!step || selectorExists(step.selector)) return;
+    if (!step) {
+      closeOnborda();
+      return;
+    }
+    if (selectorExists(step.selector)) return;
 
     const tourName = currentTour as TourName;
     const stepIndex = currentStep;
@@ -399,29 +312,15 @@ function OnboardingController({ children }: { children: ReactNode }) {
 
       const repoKey = repoKeyFromPath(pathname);
       persist((current) => {
-        if (!repoKey) {
-          return {
-            ...current,
-            global: {
-              ...current.global,
-              hasSeenIntroTour: true,
-            },
-          };
-        }
+        if (!repoKey) return current;
 
         const repo = repoState(current, repoKey);
         return {
           ...current,
-          global: {
-            ...current.global,
-            hasSeenIntroTour: current.global.hasSeenIntroTour || tour === "first-repository-setup",
-          },
           repos: {
             ...current.repos,
             [repoKey]: {
               ...repo,
-              hasSeenRepositorySetupTour:
-                repo.hasSeenRepositorySetupTour || tour === "first-repository-setup",
               dismissedTours: {
                 ...(repo.dismissedTours ?? {}),
                 [tour]: true,
@@ -433,43 +332,18 @@ function OnboardingController({ children }: { children: ReactNode }) {
       closeOnborda();
     };
 
-    const restartTour = (_event: Event) => {
-      const repoKey = repoKeyFromPath(pathname);
-      if (!repoKey) {
-        persist((current) => ({
-          ...current,
-          global: { hasSeenIntroTour: false },
-        }));
-        startTourAt("first-repository-setup", 0);
-        return;
-      }
-
-      updateRepo(repoKey, (repo) => ({
-        ...repo,
-        hasSeenRepositorySetupTour: false,
-        dismissedTours: {
-          ...(repo.dismissedTours ?? {}),
-          "first-repository-setup": false,
-        },
-      }));
-      void router.push(`/r/${repoKey.toLowerCase()}/tasks`);
-      window.setTimeout(() => startTourAt("first-repository-setup", 1), 250);
-    };
-
     window.addEventListener("symphonia:taskCreated", markTaskCreated as EventListener);
     window.addEventListener("symphonia:codexRunStarted", markCodexStarted as EventListener);
     window.addEventListener("symphonia:taskHandoffViewed", markHandoffViewed as EventListener);
     window.addEventListener("symphonia:onboarding:dismiss", dismissTour as EventListener);
-    window.addEventListener("symphonia:onboarding:restart", restartTour);
 
     return () => {
       window.removeEventListener("symphonia:taskCreated", markTaskCreated as EventListener);
       window.removeEventListener("symphonia:codexRunStarted", markCodexStarted as EventListener);
       window.removeEventListener("symphonia:taskHandoffViewed", markHandoffViewed as EventListener);
       window.removeEventListener("symphonia:onboarding:dismiss", dismissTour as EventListener);
-      window.removeEventListener("symphonia:onboarding:restart", restartTour);
     };
-  }, [closeOnborda, loaded, pathname, persist, router, startTourAt, updateRepo]);
+  }, [closeOnborda, loaded, pathname, persist, updateRepo]);
 
   return <>{children}</>;
 }
@@ -483,6 +357,8 @@ function SymphoniaOnboardingCard({
   arrow,
 }: CardComponentProps) {
   const { closeOnborda, currentTour } = useOnborda();
+  if (!step) return null;
+
   const symphoniaStep = step as SymphoniaStep;
   const isLast = currentStep >= totalSteps - 1;
   const blocked =

@@ -14,12 +14,10 @@ import {
   Sparkles,
   Users,
   ArrowLeft,
-  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DocTree } from "@/components/sidebar/doc-tree";
 import { useCommandPalette } from "@/components/command-palette";
-import { useDraftHost } from "@/components/draft-host";
 import { useNewTask } from "@/components/new-task-dialog";
 import type { RepositorySummary } from "@/lib/repository-model";
 
@@ -40,7 +38,6 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
   const base = `/r/${repoSlug}`;
   const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const palette = useCommandPalette();
-  const { startDraft } = useDraftHost();
   const newTask = useNewTask();
   const repo = useMemo(
     () => repositories.find((r) => r.key.toLowerCase() === repoSlug),
@@ -159,14 +156,6 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
 
         <nav className="space-y-0.5">
           <NavLink
-            to={base}
-            label="Clarise"
-            icon={<Sparkles className="h-3.5 w-3.5" />}
-            active={pathname === base}
-            onNavigate={handleNav}
-            title="Start with the Clarise repo chat"
-          />
-          <NavLink
             to={`${base}/inbox`}
             label="Inbox"
             icon={<Inbox className="h-3.5 w-3.5" />}
@@ -182,28 +171,23 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
             onNavigate={handleNav}
             title="Plan and track work on the board or list view"
           />
-          <NavLink
-            to={`${base}/workspace`}
-            label="Planning"
-            icon={<BookOpen className="h-3.5 w-3.5" />}
-            active={pathname === `${base}/workspace` || pathname.startsWith(`${base}/workspace/`)}
-            onNavigate={handleNav}
-            title="Use Clarise to break down goals into tasks"
-          />
         </nav>
 
         <div>
           <div className="mb-1 px-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            Documents
+            Workspace
           </div>
-          <DocTree
-            repoKey={repoKey}
-            onNew={(category) => {
-              if (category === "task") newTask.open();
-              else startDraft(repoKey, category);
-              handleNav();
-            }}
-          />
+          <nav className="mb-1 space-y-0.5">
+            <NavLink
+              to={base}
+              label="Clarise"
+              icon={<Sparkles className="h-3.5 w-3.5" />}
+              active={pathname === base}
+              onNavigate={handleNav}
+              title="Start with the Clarise repo chat"
+            />
+          </nav>
+          <DocTree repoKey={repoKey} />
         </div>
 
         <nav className="space-y-0.5">

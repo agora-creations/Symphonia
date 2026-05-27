@@ -13,7 +13,7 @@ defmodule SymphoniaService.HTTPServer do
     Workspace
   }
 
-  alias SymphoniaService.Clarise.{MilestoneLoop, PlanToTaskCompiler}
+  alias SymphoniaService.Clarise.{ArtifactExtractor, MilestoneLoop, PlanToTaskCompiler}
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
   alias SymphoniaService.Harness.{Automation, Daemon, Eligibility}
 
@@ -331,6 +331,10 @@ defmodule SymphoniaService.HTTPServer do
         repository = RepositoryRegistry.get!(registry_path, repo)
         artifact = SpecWorkspace.create_task_brief(repository, decode_json(body))
         {201, %{"artifact" => artifact}}
+
+      ["api", "repositories", repo, "clarise", "extract"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, ArtifactExtractor.extract(repository, decode_json(body))}
 
       ["api", "repositories", repo, "clarise", "milestones", "start"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)

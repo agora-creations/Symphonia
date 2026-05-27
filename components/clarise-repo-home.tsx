@@ -1,9 +1,21 @@
 "use client";
 
+import {
+  AssistantRuntimeProvider,
+  ComposerPrimitive,
+  ThreadPrimitive,
+  useComposer,
+  useComposerRuntime,
+  type DataMessagePart,
+  type MessageState,
+} from "@assistant-ui/react";
+import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
+import type { DataUIPart, UIMessage } from "ai";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
+  Command,
   FileText,
   Landmark,
   ListChecks,
@@ -13,11 +25,9 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { ClariseProviderId } from "@/lib/clarise-chat";
-
-type ChatRole = "user" | "assistant";
 
 type ArtifactResult = {
   kind: string;
@@ -34,23 +44,16 @@ type ArtifactFailure = {
   error: string;
 };
 
-type ThreadMessage = {
-  id: string;
-  role: ChatRole;
-  content: string;
-  artifacts?: ArtifactResult[];
-  failures?: ArtifactFailure[];
-  setupHref?: string;
-  pending?: boolean;
+type ClariseDataTypes = {
+  artifact_result: { artifact: ArtifactResult };
+  artifact_failure: ArtifactFailure;
+  extraction_fallback: { reason: string };
+  missing_fields: { fields: { kind: string; field: string }[] };
+  tool_call: { name: "create_private_artifact"; artifactKind: string; title: string };
+  done: { createdCount: number; failedCount: number };
 };
 
-type StreamEvent =
-  | { type: "message_delta"; text: string }
-  | { type: "artifact_result"; artifact: ArtifactResult }
-  | { type: "artifact_failure"; artifactKind: string; title: string; error: string }
-  | { type: "done"; createdCount: number; failedCount: number }
-  | { type: "missing_fields"; fields: { kind: string; field: string }[] }
-  | { type: "tool_call"; name: string; artifactKind: string; title: string };
+type ClariseUIMessage = UIMessage<unknown, ClariseDataTypes>;
 
 const PROVIDERS: { id: ClariseProviderId; label: string }[] = [
   { id: "codex_app_server", label: "Codex" },
@@ -59,34 +62,40 @@ const PROVIDERS: { id: ClariseProviderId; label: string }[] = [
   { id: "cursor", label: "Cursor" },
 ];
 
-const STARTERS = [
+const SLASH_COMMANDS = [
   {
-    label: "Create a milestone",
+    command: "/milestone",
+    label: "Milestone",
     icon: Milestone,
     prompt: "Create a milestone\nTitle: \nGoal: ",
   },
   {
-    label: "Draft a decision",
-    icon: Landmark,
-    prompt: "Create a decision\nMilestone: \nTitle: \nDecision: ",
-  },
-  {
-    label: "Capture a requirement",
+    command: "/requirement",
+    label: "Requirement",
     icon: ListChecks,
     prompt: "Create a requirement\nMilestone: \nTitle: \nRequirement: ",
   },
   {
-    label: "Draft a plan",
+    command: "/plan",
+    label: "Plan",
     icon: FileText,
     prompt: "Create a plan\nMilestone: \nTitle: \nPlan: ",
   },
   {
-    label: "Create an execution-ready task brief",
+    command: "/decision",
+    label: "Decision",
+    icon: Landmark,
+    prompt: "Create a decision\nMilestone: \nTitle: \nDecision: ",
+  },
+  {
+    command: "/task-brief",
+    label: "Task brief",
     icon: FileText,
     prompt: "Create an execution-ready task brief\nTitle: \nGoal: ",
   },
   {
-    label: "Set up WORKFLOW.md",
+    command: "/workflow",
+    label: "WORKFLOW.md",
     icon: ShieldCheck,
     prompt: "Set up WORKFLOW.md",
   },
@@ -96,258 +105,127 @@ export function ClariseRepoHome({ repoKey }: { repoKey: string }) {
   const repoSlug = repoKey.toLowerCase();
   const storageKey = `symphonia.clarise.provider.${repoKey}`;
   const router = useRouter();
-  const [provider, setProvider] = useState<ClariseProviderId>("codex_app_server");
-  const [draft, setDraft] = useState("");
-  const [messages, setMessages] = useState<ThreadMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content:
-        "Start by telling Clarise what you want to build. Clarise will create the private workspace structure for this repository.",
-    },
-  ]);
-  const [pending, setPending] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  const redirectedRef = useRef(false);
+  const [provider, setProvider] = useStoredClariseProvider(storageKey);
 
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(storageKey);
+  const initialMessages = useMemo<ClariseUIMessage[]>(
+    () => [
+      {
+        id: "welcome",
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            text:
+              "Start by telling Clarise what you want to build. Clarise will create the private workspace structure for this repository.",
+          },
+        ],
+      },
+    ],
+    [],
+  );
+
+  const transport = useMemo(
+    () =>
+      new AssistantChatTransport<ClariseUIMessage>({
+        api: `/api/repositories/${encodeURIComponent(repoKey)}/clarise/chat`,
+        body: { provider },
+      }),
+    [provider, repoKey],
+  );
+
+  const runtime = useChatRuntime<ClariseUIMessage>({
+    id: `clarise-${repoKey}`,
+    messages: initialMessages,
+    transport,
+    onData: (part: DataUIPart<ClariseDataTypes>) => {
       if (
-        stored === "codex_app_server" ||
-        stored === "claude_code" ||
-        stored === "gemini" ||
-        stored === "cursor"
+        part.type === "data-done" &&
+        part.data.createdCount > 0 &&
+        !redirectedRef.current
       ) {
-        setProvider(stored);
+        redirectedRef.current = true;
+        router.push(`/r/${repoSlug}/workspace?created=private`);
       }
-    } catch {
-      /* ignore */
-    }
-  }, [storageKey]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(storageKey, provider);
-    } catch {
-      /* ignore */
-    }
-  }, [provider, storageKey]);
-
-  useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages]);
-
-  const visibleMessages = useMemo(() => messages.filter((message) => message.content), [messages]);
-
-  const chooseStarter = (prompt: string) => {
-    setDraft(prompt);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  };
-
-  const send = async (event?: FormEvent) => {
-    event?.preventDefault();
-    const text = draft.trim();
-    if (!text || pending) return;
-
-    const userMessage: ThreadMessage = {
-      id: `u-${Date.now()}`,
-      role: "user",
-      content: text,
-    };
-    const assistantId = `a-${Date.now()}`;
-    const assistantMessage: ThreadMessage = {
-      id: assistantId,
-      role: "assistant",
-      content: "",
-      artifacts: [],
-      failures: [],
-      pending: true,
-    };
-
-    const nextMessages = [...messages, userMessage, assistantMessage];
-    setMessages(nextMessages);
-    setDraft("");
-    setPending(true);
-
-    try {
-      const response = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/clarise/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          messages: [...messages, userMessage].map((message) => ({
-            role: message.role === "assistant" ? "assistant" : "user",
-            content: message.content,
-          })),
-        }),
-      });
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as {
-          error?: string;
-          providerSetupHref?: string;
-        };
-        updateAssistant(assistantId, (message) => ({
-          ...message,
-          content: payload.error ?? "Clarise could not start.",
-          setupHref: payload.providerSetupHref,
-          pending: false,
-        }));
-        return;
-      }
-
-      await readClariseStream(response, (streamEvent) => {
-        updateAssistant(assistantId, (message) => applyStreamEvent(message, streamEvent));
-        if (streamEvent.type === "done" && streamEvent.createdCount > 0) {
-          router.push(`/r/${repoSlug}/workspace?created=private`);
-        }
-      });
-    } catch (error) {
-      updateAssistant(assistantId, (message) => ({
-        ...message,
-        content: error instanceof Error ? error.message : "Clarise could not respond.",
-        pending: false,
-      }));
-    } finally {
-      setPending(false);
-      updateAssistant(assistantId, (message) => ({ ...message, pending: false }));
-    }
-  };
-
-  const updateAssistant = (id: string, updater: (message: ThreadMessage) => ThreadMessage) => {
-    setMessages((current) => current.map((message) => (message.id === id ? updater(message) : message)));
-  };
+    },
+  });
 
   return (
-    <div className="flex min-h-full flex-col bg-background text-foreground">
-      <header className="border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-brand-accent-soft text-brand-accent-text">
-                <Sparkles className="h-4 w-4" />
-              </span>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Clarise
-              </p>
-              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
-                Private
-              </span>
+    <AssistantRuntimeProvider runtime={runtime}>
+      <div className="flex min-h-full flex-col bg-background text-foreground">
+        <header className="border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-brand-accent-soft text-brand-accent-text">
+                  <Sparkles className="h-4 w-4" />
+                </span>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Clarise
+                </p>
+              </div>
+              <h1 className="mt-2 break-words text-[30px] font-bold leading-none sm:text-[42px]">
+                {repoKey} repo planning
+              </h1>
             </div>
-            <h1 className="mt-2 break-words text-[30px] font-bold leading-none sm:text-[42px]">
-              {repoKey} repo planning
-            </h1>
+
+            <label className="flex items-center gap-2 rounded-[8px] border bg-card px-3 py-2 text-[12px] text-muted-foreground">
+              Provider
+              <select
+                value={provider}
+                onChange={(event) => setProvider(event.target.value as ClariseProviderId)}
+                className="bg-transparent text-[13px] font-medium text-foreground outline-none"
+                aria-label="Clarise provider"
+              >
+                {PROVIDERS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
+        </header>
 
-          <label className="flex items-center gap-2 rounded-[8px] border bg-card px-3 py-2 text-[12px] text-muted-foreground">
-            Provider
-            <select
-              value={provider}
-              onChange={(event) => setProvider(event.target.value as ClariseProviderId)}
-              className="bg-transparent text-[13px] font-medium text-foreground outline-none"
-              aria-label="Clarise provider"
-            >
-              {PROVIDERS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </header>
-
-      <main className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <section className="flex min-h-0 flex-col">
-          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+        <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
+          <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
             <div className="mx-auto flex max-w-4xl flex-col gap-4">
-              {visibleMessages.map((message) => (
-                <MessageBubble key={message.id} message={message} />
-              ))}
+              <ThreadPrimitive.Messages>
+                {({ message }) => <ClariseMessage key={message.id} message={message} />}
+              </ThreadPrimitive.Messages>
             </div>
-          </div>
+          </ThreadPrimitive.Viewport>
 
-          <form onSubmit={send} className="border-t bg-background/95 px-4 py-4 sm:px-6">
-            <div className="mx-auto max-w-4xl">
-              <div className="mb-3 flex flex-wrap gap-2">
-                {STARTERS.map((starter) => {
-                  const Icon = starter.icon;
-                  return (
-                    <button
-                      key={starter.label}
-                      type="button"
-                      onClick={() => chooseStarter(starter.prompt)}
-                      className="inline-flex h-8 items-center gap-2 rounded-[8px] border bg-card px-3 text-[12px] font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground"
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      {starter.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex items-end gap-3 rounded-[10px] border bg-card p-3 shadow-[var(--elevation-card)]">
-                <textarea
-                  ref={inputRef}
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      void send();
-                    }
-                  }}
-                  rows={2}
-                  placeholder="Add the required fields, then Clarise saves the private doc."
-                  aria-label="Message Clarise"
-                  className="max-h-40 min-h-[3.5rem] flex-1 resize-none bg-transparent text-[15px] leading-6 outline-none placeholder:text-muted-foreground/60"
-                />
-                <button
-                  type="submit"
-                  disabled={pending || !draft.trim()}
-                  aria-label="Send"
-                  className="grid h-10 w-10 shrink-0 place-items-center rounded-[8px] bg-primary text-primary-foreground transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-          </form>
-        </section>
-
-        <aside className="border-t bg-sidebar/45 px-4 py-4 lg:border-l lg:border-t-0">
-          <div className="space-y-3">
-            <Link
-              href={`/r/${repoSlug}/workspace`}
-              className="group flex items-center justify-between rounded-[8px] border bg-card px-3 py-2 text-[13px] font-medium text-foreground hover:bg-accent"
-            >
-              Workspace
-              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground" />
-            </Link>
-            <Link
-              href={`/r/${repoSlug}/tasks`}
-              className="group flex items-center justify-between rounded-[8px] border bg-card px-3 py-2 text-[13px] font-medium text-foreground hover:bg-accent"
-            >
-              Tasks
-              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground" />
-            </Link>
-            <Link
-              href={`/r/${repoSlug}/settings`}
-              className="group flex items-center justify-between rounded-[8px] border bg-card px-3 py-2 text-[13px] font-medium text-foreground hover:bg-accent"
-            >
-              Provider setup
-              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground" />
-            </Link>
-          </div>
-        </aside>
-      </main>
-    </div>
+          <ClariseComposer />
+        </ThreadPrimitive.Root>
+      </div>
+    </AssistantRuntimeProvider>
   );
 }
 
-function MessageBubble({ message }: { message: ThreadMessage }) {
+function ClariseMessage({ message }: { message: MessageState }) {
   const isUser = message.role === "user";
+  const text = message.content
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("");
+  const dataParts = message.content.flatMap((part) =>
+    part.type === "data" ? [part as DataMessagePart] : [],
+  );
+  const artifacts = dataParts.flatMap((part) =>
+    part.name === "artifact_result" && isArtifactResultPayload(part.data)
+      ? [part.data.artifact]
+      : [],
+  );
+  const failures = dataParts.flatMap((part) =>
+    part.name === "artifact_failure" && isArtifactFailure(part.data) ? [part.data] : [],
+  );
+  const fallback = dataParts.find(
+    (part) => part.name === "extraction_fallback" && isFallbackPayload(part.data),
+  );
+  const missingFields = dataParts.find(
+    (part) => part.name === "missing_fields" && isMissingFieldsPayload(part.data),
+  );
+  const running = message.status?.type === "running";
 
   return (
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
@@ -359,36 +237,38 @@ function MessageBubble({ message }: { message: ThreadMessage }) {
             : "border bg-card text-foreground shadow-[var(--elevation-card)]",
         )}
       >
-        <p className="whitespace-pre-wrap">{message.content}</p>
+        {text && <p className="whitespace-pre-wrap">{text}</p>}
 
-        {message.pending && (
+        {running && (
           <div className="mt-3 inline-flex items-center gap-2 text-[12px] text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             Working
           </div>
         )}
 
-        {message.setupHref && (
-          <Link
-            href={message.setupHref}
-            className="mt-3 inline-flex items-center gap-1 rounded-[8px] border px-3 py-1.5 text-[12px] font-medium hover:bg-accent"
-          >
-            Open settings
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+        {fallback && isFallbackPayload(fallback.data) && (
+          <div className="mt-3 rounded-[8px] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300">
+            Codex extraction fell back to the deterministic parser: {fallback.data.reason}
+          </div>
         )}
 
-        {message.artifacts && message.artifacts.length > 0 && (
+        {missingFields && isMissingFieldsPayload(missingFields.data) && (
+          <div className="mt-3 rounded-[8px] border bg-background/55 px-3 py-2 text-[12px] text-muted-foreground">
+            {missingFields.data.fields.map((field) => `${artifactLabel(field.kind)}: ${field.field}`).join("; ")}
+          </div>
+        )}
+
+        {artifacts.length > 0 && (
           <div className="mt-3 grid gap-2">
-            {message.artifacts.map((artifact) => (
+            {artifacts.map((artifact) => (
               <ArtifactCard key={`${artifact.type}:${artifact.id}`} artifact={artifact} />
             ))}
           </div>
         )}
 
-        {message.failures && message.failures.length > 0 && (
+        {failures.length > 0 && (
           <div className="mt-3 grid gap-2">
-            {message.failures.map((failure) => (
+            {failures.map((failure) => (
               <div
                 key={`${failure.artifactKind}:${failure.title}`}
                 className="rounded-[8px] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300"
@@ -398,6 +278,72 @@ function MessageBubble({ message }: { message: ThreadMessage }) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ClariseComposer() {
+  const composer = useComposerRuntime();
+  const text = useComposer((state) => state.text);
+  const query = text.startsWith("/") ? text.slice(1).toLowerCase() : "";
+  const showMenu = text.startsWith("/");
+  const commands = SLASH_COMMANDS.filter((item) => {
+    if (!query) return true;
+    return (
+      item.command.slice(1).includes(query) ||
+      item.label.toLowerCase().includes(query)
+    );
+  });
+
+  return (
+    <div className="border-t bg-background/95 px-4 py-4 sm:px-6">
+      <div className="relative mx-auto max-w-4xl">
+        {showMenu && commands.length > 0 && (
+          <div className="absolute bottom-[calc(100%+0.5rem)] left-0 z-10 w-full max-w-md rounded-[8px] border bg-popover p-1 shadow-[var(--elevation-card)]">
+            {commands.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.command}
+                  type="button"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    composer.setText(item.prompt);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-[6px] px-3 py-2 text-left text-[13px] hover:bg-accent"
+                >
+                  <span className="grid h-7 w-7 place-items-center rounded-[6px] bg-brand-accent-soft text-brand-accent-text">
+                    <Icon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium text-foreground">{item.label}</span>
+                    <span className="block text-[12px] text-muted-foreground">{item.command}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <ComposerPrimitive.Root className="flex items-end gap-3 rounded-[10px] border bg-card p-3 shadow-[var(--elevation-card)]">
+          <span className="mb-2 grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-background text-muted-foreground">
+            <Command className="h-4 w-4" />
+          </span>
+          <ComposerPrimitive.Input
+            rows={2}
+            submitMode="enter"
+            placeholder="Message Clarise or type / for artifact commands."
+            aria-label="Message Clarise"
+            className="max-h-40 min-h-[3.5rem] flex-1 resize-none bg-transparent text-[15px] leading-6 outline-none placeholder:text-muted-foreground/60"
+          />
+          <ComposerPrimitive.Send
+            aria-label="Send"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-[8px] bg-primary text-primary-foreground transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <Send className="h-4 w-4" />
+          </ComposerPrimitive.Send>
+        </ComposerPrimitive.Root>
       </div>
     </div>
   );
@@ -431,6 +377,38 @@ function ArtifactCard({ artifact }: { artifact: ArtifactResult }) {
   );
 }
 
+function useStoredClariseProvider(
+  storageKey: string,
+): [ClariseProviderId, (provider: ClariseProviderId) => void] {
+  const [provider, setProvider] = useState<ClariseProviderId>("codex_app_server");
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      if (
+        stored === "codex_app_server" ||
+        stored === "claude_code" ||
+        stored === "gemini" ||
+        stored === "cursor"
+      ) {
+        setProvider(stored);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [setProvider, storageKey]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, provider);
+    } catch {
+      /* ignore */
+    }
+  }, [provider, storageKey]);
+
+  return [provider, setProvider];
+}
+
 function artifactLabel(kind: string): string {
   if (kind === "milestone") return "Milestone";
   if (kind === "requirements") return "Requirement";
@@ -439,47 +417,50 @@ function artifactLabel(kind: string): string {
   return "Task brief";
 }
 
-async function readClariseStream(
-  response: Response,
-  onEvent: (event: StreamEvent) => void,
-) {
-  const reader = response.body?.getReader();
-  if (!reader) return;
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split("\n\n");
-    buffer = events.pop() ?? "";
-
-    for (const event of events) {
-      const dataLine = event.split("\n").find((line) => line.startsWith("data: "));
-      if (!dataLine) continue;
-      onEvent(JSON.parse(dataLine.slice(6)) as StreamEvent);
-    }
-  }
+function isArtifactResultPayload(value: unknown): value is { artifact: ArtifactResult } {
+  return isRecord(value) && isArtifact(value.artifact);
 }
 
-function applyStreamEvent(message: ThreadMessage, event: StreamEvent): ThreadMessage {
-  if (event.type === "message_delta") {
-    return { ...message, content: `${message.content}${event.text}` };
-  }
+function isArtifact(value: unknown): value is ArtifactResult {
+  return (
+    isRecord(value) &&
+    typeof value.kind === "string" &&
+    typeof value.type === "string" &&
+    typeof value.id === "string" &&
+    typeof value.title === "string" &&
+    typeof value.status === "string" &&
+    typeof value.href === "string"
+  );
+}
 
-  if (event.type === "artifact_result") {
-    return { ...message, artifacts: [...(message.artifacts ?? []), event.artifact] };
-  }
+function isArtifactFailure(value: unknown): value is ArtifactFailure {
+  return (
+    isRecord(value) &&
+    typeof value.artifactKind === "string" &&
+    typeof value.title === "string" &&
+    typeof value.error === "string"
+  );
+}
 
-  if (event.type === "artifact_failure") {
-    return { ...message, failures: [...(message.failures ?? []), event] };
-  }
+function isFallbackPayload(value: unknown): value is { reason: string } {
+  return isRecord(value) && typeof value.reason === "string";
+}
 
-  if (event.type === "done") {
-    return { ...message, pending: false };
-  }
+function isMissingFieldsPayload(
+  value: unknown,
+): value is { fields: { kind: string; field: string }[] } {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.fields) &&
+    value.fields.every(
+      (field) =>
+        isRecord(field) &&
+        typeof field.kind === "string" &&
+        typeof field.field === "string",
+    )
+  );
+}
 
-  return message;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

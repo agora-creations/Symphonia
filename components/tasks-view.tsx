@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   PRIORITY_LABELS,
@@ -27,17 +27,11 @@ import {
   isActiveRun,
   runDisplayForTask,
 } from "@/lib/harness-ui-model";
-import type { RepositoryAutomationState, WorkspaceState } from "@/lib/repository-model";
-import type { RepositoryGitHubState } from "@/lib/repository-model";
+import type { RepositoryAutomationState } from "@/lib/repository-model";
 import {
-  AlertTriangle,
   Bot,
-  Check,
-  FileCheck2,
   Filter,
-  Github,
   Plus,
-  Power,
   SlidersHorizontal,
   LayoutGrid,
   List,
@@ -62,36 +56,6 @@ async function fetchAutomation(repoKey: string): Promise<RepositoryAutomationSta
   };
   if (!res.ok || !payload.automation) {
     throw new Error(payload.error ?? "Could not load automation");
-  }
-  return payload.automation;
-}
-
-async function fetchRepositoryGitHub(repoKey: string): Promise<RepositoryGitHubState> {
-  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/github`, {
-    cache: "no-store",
-  });
-  const payload = (await res.json()) as {
-    github?: RepositoryGitHubState;
-    error?: string;
-  };
-  if (!res.ok || !payload.github) {
-    throw new Error(payload.error ?? "Could not load GitHub state");
-  }
-  return payload.github;
-}
-
-async function setAutomationEnabled(repoKey: string): Promise<RepositoryAutomationState> {
-  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/automation/enable`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ provider: "codex_app_server" }),
-  });
-  const payload = (await res.json()) as {
-    automation?: RepositoryAutomationState;
-    error?: string;
-  };
-  if (!res.ok || !payload.automation) {
-    throw new Error(payload.error ?? "Codex is not available yet. You can finish repository setup now and enable Codex later.");
   }
   return payload.automation;
 }
@@ -365,29 +329,6 @@ function TaskRow({
 
 const PRIORITIES: Priority[] = ["urgent", "high", "medium", "low", "no-priority"];
 
-async function fetchWorkspace(repoKey: string): Promise<WorkspaceState> {
-  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/workspace`, {
-    cache: "no-store",
-  });
-  const payload = (await res.json()) as { workspace?: WorkspaceState; error?: string };
-  if (!res.ok || !payload.workspace) {
-    throw new Error(payload.error ?? "Could not load repository setup");
-  }
-  return payload.workspace;
-}
-
-async function initializeWorkspace(repoKey: string): Promise<WorkspaceState> {
-  const res = await fetch(
-    `/api/repositories/${encodeURIComponent(repoKey)}/workspace/initialize`,
-    { method: "POST" },
-  );
-  const payload = (await res.json()) as { workspace?: WorkspaceState; error?: string };
-  if (!res.ok || !payload.workspace) {
-    throw new Error(payload.error ?? "Could not create Symphonia files");
-  }
-  return payload.workspace;
-}
-
 /**
  * Repository Tasks board/list, the locked default landing view.
  *
@@ -401,14 +342,10 @@ export function TasksView({ repoKey }: { repoKey: string }) {
   const [tasks, setTasks] = useState<ServiceTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [automation, setAutomation] = useState<RepositoryAutomationState | null>(null);
-  const [github, setGithub] = useState<RepositoryGitHubState | null>(null);
   const [eligibilityByTask, setEligibilityByTask] = useState<
     Record<string, TaskEligibilityExplanation>
   >({});
-  const [workspacePending, setWorkspacePending] = useState(false);
-  const [automationPending, setAutomationPending] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [sourceMilestone, setSourceMilestone] = useState<string | null>(null);
   const [createdTaskKeys, setCreatedTaskKeys] = useState<string[]>([]);
@@ -504,18 +441,11 @@ export function TasksView({ repoKey }: { repoKey: string }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([
-      fetchWorkspace(repoKey),
-      fetchTasks(repoKey),
-      fetchAutomation(repoKey),
-      fetchRepositoryGitHub(repoKey).catch(() => null),
-    ])
-      .then(([nextWorkspace, nextTasks, nextAutomation, nextGithub]) => {
+    Promise.all([fetchTasks(repoKey), fetchAutomation(repoKey)])
+      .then(([nextTasks, nextAutomation]) => {
         if (!cancelled) {
-          setWorkspace(nextWorkspace);
           setTasks(nextTasks);
           setAutomation(nextAutomation);
-          setGithub(nextGithub);
         }
       })
       .catch((err: unknown) => {
@@ -600,30 +530,6 @@ export function TasksView({ repoKey }: { repoKey: string }) {
       setError(safeMessage(err, "Could not update task"));
     } finally {
       setPendingKey(null);
-    }
-  };
-
-  const createWorkspaceFolders = async () => {
-    setWorkspacePending(true);
-    setError(null);
-    try {
-      setWorkspace(await initializeWorkspace(repoKey));
-    } catch (err) {
-      setError(safeMessage(err, "Could not create Symphonia files"));
-    } finally {
-      setWorkspacePending(false);
-    }
-  };
-
-  const enableCodex = async () => {
-    setAutomationPending(true);
-    setError(null);
-    try {
-      setAutomation(await setAutomationEnabled(repoKey));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Codex is not available yet. You can finish repository setup now and enable Codex later.");
-    } finally {
-      setAutomationPending(false);
     }
   };
 
@@ -720,20 +626,6 @@ export function TasksView({ repoKey }: { repoKey: string }) {
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
           {error}
         </div>
-      )}
-
-      {workspace && automation && !loading && (
-        <RepositorySetupStatus
-          repoKey={repoKey}
-          repoSlug={repoSlug}
-          workspace={workspace}
-          automation={automation}
-          github={github}
-          workspacePending={workspacePending}
-          automationPending={automationPending}
-          onCreateFiles={createWorkspaceFolders}
-          onEnableCodex={enableCodex}
-        />
       )}
 
       {sourceMilestone && !loading && (
@@ -845,226 +737,6 @@ export function TasksView({ repoKey }: { repoKey: string }) {
       )}
     </div>
   );
-}
-
-function RepositorySetupStatus({
-  repoKey,
-  repoSlug,
-  workspace,
-  automation,
-  github,
-  workspacePending,
-  automationPending,
-  onCreateFiles,
-  onEnableCodex,
-}: {
-  repoKey: string;
-  repoSlug: string;
-  workspace: WorkspaceState;
-  automation: RepositoryAutomationState;
-  github: RepositoryGitHubState | null;
-  workspacePending: boolean;
-  automationPending: boolean;
-  onCreateFiles: () => void;
-  onEnableCodex: () => void;
-}) {
-  const filesReady = workspace.initialized;
-  const rulesReady = workspace.workflow.exists && workspace.workflow.valid;
-  const githubReady = github?.access?.state === "linked" || github?.link != null;
-  const codexReady = automation.enabled;
-  const baseReady = filesReady && rulesReady;
-  const allReady = baseReady && githubReady && codexReady;
-  const installUrl = withRepoState(github?.connection.installationUrl, repoKey);
-  const manageUrl = github?.connection.manageUrl ?? github?.connection.installationUrl;
-
-  return (
-    <section
-      id="repository-setup-status"
-      data-repository-ready={baseReady ? "true" : "false"}
-    className="border-b bg-[var(--card-alt)] px-4 py-3"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-[15px] font-bold tracking-[-0.02em]">Repository setup</h2>
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
-                allReady
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                  : baseReady
-                    ? "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300"
-                    : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-              )}
-            >
-              {allReady ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
-              {allReady ? "Repository is ready" : baseReady ? "Ready for tasks" : "Needs setup"}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Set up this repository so Codex can work safely. Tour progress does not change setup
-            status.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-3 grid gap-2 md:grid-cols-4">
-        <SetupStepCard
-          icon={<FileCheck2 className="h-4 w-4" />}
-          title="Symphonia files"
-          description={
-            filesReady
-              ? "Tasks, reviews, decisions, and summaries have a place in this repository."
-              : "Create the repository files Symphonia uses for durable work."
-          }
-          ready={filesReady}
-          action={
-            filesReady ? null : (
-              <button
-                onClick={onCreateFiles}
-                disabled={workspacePending}
-                className="rounded-[8px] border bg-background px-2 py-1 text-[11px] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {workspacePending ? "Creating..." : "Create files"}
-              </button>
-            )
-          }
-        />
-        <SetupStepCard
-          id="repository-rules-card"
-          icon={<FileCheck2 className="h-4 w-4" />}
-          title="Repository rules"
-          description={
-            rulesReady
-              ? "Review, retry, and pull request rules are configured."
-              : "Choose when Codex asks for review, retries, and opens pull requests."
-          }
-          ready={rulesReady}
-          action={
-            <Link
-              href={`/r/${repoSlug}/workflow`}
-              className="rounded-[8px] border bg-background px-2 py-1 text-[11px] hover:bg-accent"
-            >
-              {rulesReady ? "Edit rules" : "Choose rules"}
-            </Link>
-          }
-        />
-        <SetupStepCard
-          id="github-connect-card"
-          icon={<Github className="h-4 w-4" />}
-          title="GitHub"
-          description={
-            githubReady
-              ? "This repository can use GitHub branches and pull requests."
-              : "Connect GitHub so Symphonia can prepare review branches."
-          }
-          ready={githubReady}
-          action={
-            githubReady && manageUrl ? (
-              <a
-                href={manageUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-[8px] border bg-background px-2 py-1 text-[11px] hover:bg-accent"
-              >
-                Manage
-              </a>
-            ) : installUrl ? (
-              <a
-                href={installUrl}
-                className="rounded-[8px] border bg-background px-2 py-1 text-[11px] hover:bg-accent"
-              >
-                Connect GitHub
-              </a>
-            ) : (
-              <span className="text-[11px] text-muted-foreground">Unavailable</span>
-            )
-          }
-        />
-        <SetupStepCard
-          id="codex-enable-card"
-          icon={<Power className="h-4 w-4" />}
-          title="Codex"
-          description={
-            codexReady
-              ? "Codex can work on eligible tasks in this repository."
-              : "If Codex is unavailable, finish setup now and enable it later."
-          }
-          ready={codexReady}
-          action={
-            codexReady ? null : (
-              <button
-                onClick={onEnableCodex}
-                disabled={automationPending}
-                className="rounded-[8px] border bg-background px-2 py-1 text-[11px] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {automationPending ? "Enabling..." : "Enable Codex"}
-              </button>
-            )
-          }
-        />
-      </div>
-    </section>
-  );
-}
-
-function SetupStepCard({
-  id,
-  icon,
-  title,
-  description,
-  ready,
-  action,
-}: {
-  id?: string;
-  icon: ReactNode;
-  title: string;
-  description: string;
-  ready: boolean;
-  action: ReactNode;
-}) {
-  return (
-    <div id={id} className="rounded-[10px] border bg-card p-3 shadow-[var(--elevation-card)]">
-      <div className="flex items-start justify-between gap-2">
-        <span
-          className={cn(
-            "grid h-8 w-8 shrink-0 place-items-center rounded-[8px] border",
-            ready
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-              : "text-muted-foreground",
-          )}
-        >
-          {ready ? <Check className="h-4 w-4" /> : icon}
-        </span>
-        <span
-          className={cn(
-            "rounded-full border px-1.5 py-0.5 text-[10px]",
-            ready
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-              : "text-muted-foreground",
-          )}
-        >
-          {ready ? "Ready" : "Needed"}
-        </span>
-      </div>
-      <h3 className="mt-3 text-sm font-medium">{title}</h3>
-      <p className="mt-1 min-h-10 text-xs leading-5 text-muted-foreground">{description}</p>
-      {action && <div className="mt-3">{action}</div>}
-    </div>
-  );
-}
-
-function withRepoState(url: string | undefined, repoKey: string): string | undefined {
-  if (!url) return undefined;
-
-  try {
-    const next = new URL(url);
-    next.searchParams.set("state", repoKey);
-    return next.toString();
-  } catch {
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}state=${encodeURIComponent(repoKey)}`;
-  }
 }
 
 function TaskActionBar({

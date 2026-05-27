@@ -104,6 +104,33 @@ export function planClariseResponse(messages: ClariseChatMessage[]): ClarisePlan
   };
 }
 
+export function normalizeClarisePlan(value: unknown): ClarisePlan | null {
+  if (!isRecord(value)) return null;
+
+  const artifactDrafts = Array.isArray(value.artifactDrafts)
+    ? value.artifactDrafts.flatMap(normalizeArtifactDraft)
+    : [];
+  const missingFields = Array.isArray(value.missingFields)
+    ? value.missingFields.flatMap(normalizeMissingField)
+    : [];
+  const assistantText =
+    stringValue(value.assistantText) ||
+    (artifactDrafts.length > 0 ? createdText(artifactDrafts) : "") ||
+    (missingFields.length > 0 ? missingText(missingFields) : "");
+
+  if (!assistantText && artifactDrafts.length === 0 && missingFields.length === 0) {
+    return null;
+  }
+
+  return {
+    assistantText:
+      assistantText ||
+      "I can create private milestones, requirements, plans, decisions, and task briefs.",
+    artifactDrafts,
+    missingFields,
+  };
+}
+
 function latestUserMessage(messages: ClariseChatMessage[]): string {
   return [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
 }
@@ -374,6 +401,69 @@ function withParent(
 function requiredString(value: string | undefined): string {
   if (!value?.trim()) throw new Error("Required Clarise field was missing.");
   return value.trim();
+}
+
+function normalizeArtifactDraft(value: unknown): ClariseArtifactDraft[] {
+  if (!isRecord(value)) return [];
+  const kind = normalizeKind(value.kind);
+  const title = stringValue(value.title);
+  const body = stringValue(value.body);
+  const confirmation = stringValue(value.confirmation);
+  if (!kind || !title || !body || !confirmation) return [];
+
+  const rawMetadata = isRecord(value.metadata) ? value.metadata : {};
+
+  return [
+    {
+      kind,
+      title,
+      body,
+      confirmation,
+      metadata: {
+        ...rawMetadata,
+        title,
+        status: stringValue(rawMetadata.status) || "draft",
+        source: stringValue(rawMetadata.source) || "clarise_chat",
+        private: true,
+        provider_created_at:
+          stringValue(rawMetadata.provider_created_at) || new Date().toISOString(),
+      },
+      parentMilestoneId: stringValue(value.parentMilestoneId),
+      linkToBatchMilestone: value.linkToBatchMilestone === true,
+    },
+  ];
+}
+
+function normalizeMissingField(value: unknown): ClariseMissingField[] {
+  if (!isRecord(value)) return [];
+  const kind = normalizeKind(value.kind);
+  const field = stringValue(value.field);
+  if (!kind || !field) return [];
+  return [{ kind, field }];
+}
+
+function normalizeKind(value: unknown): ClariseArtifactKind | null {
+  if (
+    value === "milestone" ||
+    value === "requirements" ||
+    value === "plan" ||
+    value === "decision" ||
+    value === "task_brief"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function stringValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function createdText(drafts: ClariseArtifactDraft[]): string {

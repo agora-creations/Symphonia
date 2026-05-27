@@ -138,7 +138,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
         "approvalsReviewer" => "auto_review",
         "cwd" => workspace_path,
         "runtimeWorkspaceRoots" => [workspace_path],
-        "sandbox" => "workspace-write",
+        "sandbox" => sandbox(opts),
         "serviceName" => "symphonia",
         "threadSource" => "subagent"
       }
@@ -165,7 +165,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
         "cwd" => workspace_path,
         "excludeTurns" => true,
         "runtimeWorkspaceRoots" => [workspace_path],
-        "sandbox" => "workspace-write",
+        "sandbox" => sandbox(opts),
         "threadId" => thread_id
       }
       |> maybe_put("model", configured_model())
@@ -417,17 +417,19 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
 
   defp last_message(events) do
     events
-    |> Enum.reverse()
-    |> Enum.find_value(fn event ->
+    |> Enum.map(fn event ->
       params = event["params"] || %{}
       text = params["text"] || params["message"] || delta_text(params["delta"])
 
       if is_binary(text) and String.trim(text) != "" do
-        String.trim(text)
+        text
       end
     end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("")
+    |> String.trim()
     |> case do
-      nil -> ""
+      "" -> ""
       value -> value
     end
   end
@@ -448,6 +450,13 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
     case System.get_env("SYMPHONIA_CODEX_MODEL") do
       value when is_binary(value) and value != "" -> value
       _ -> nil
+    end
+  end
+
+  defp sandbox(opts) do
+    case Keyword.get(opts, :sandbox) do
+      value when is_binary(value) and value != "" -> value
+      _ -> "workspace-write"
     end
   end
 

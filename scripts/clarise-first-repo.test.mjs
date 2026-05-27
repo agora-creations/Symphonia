@@ -51,28 +51,55 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
 test("Clarise home keeps chat private and exposes workspace result actions", async () => {
   const home = await source("components/clarise-repo-home.tsx");
 
+  assert.match(home, /AssistantRuntimeProvider/);
+  assert.match(home, /useChatRuntime/);
+  assert.match(home, /AssistantChatTransport/);
+  assert.match(home, /ComposerPrimitive/);
   assert.match(home, /symphonia\.clarise\.provider\.\$\{repoKey\}/);
   assert.match(home, /codex_app_server/);
   assert.match(home, /View in workspace/);
   assert.match(home, /router\.push\(`\/r\/\$\{repoSlug\}\/workspace\?created=private`\)/);
   assert.match(home, /Private/);
+  assert.match(home, /\/milestone/);
+  assert.match(home, /\/workflow/);
   assert.doesNotMatch(home, /localStorage\.setItem\([^)]*messages/i);
 });
 
-test("Clarise chat route streams artifacts and blocks unconnected providers without prohibited writes", async () => {
+test("Clarise chat route uses AI SDK streams and Codex extraction without prohibited writes", async () => {
   const route = await source("app/api/repositories/[repoKey]/clarise/chat/route.ts");
+  const service = await source("services/symphonia_service/lib/symphonia_service/http_server.ex");
 
-  assert.match(route, /text\/event-stream/);
+  assert.match(route, /createUIMessageStreamResponse/);
+  assert.match(route, /extractPlanWithCodex/);
+  assert.match(route, /\/clarise\/extract/);
+  assert.match(route, /data-artifact_result/);
+  assert.match(route, /data-missing_fields/);
   assert.match(route, /provider_not_connected/);
   assert.match(route, /create_private_artifact/);
+  assert.match(service, /ArtifactExtractor\.extract/);
   assert.doesNotMatch(route, /\/api\/github/);
   assert.doesNotMatch(route, /coding-assistant/);
   assert.doesNotMatch(route, /open-pull-request/);
   assert.doesNotMatch(route, /transcript/i);
 });
 
+test("assistant-ui dependencies and React peer range are installed intentionally", async () => {
+  const manifest = JSON.parse(await source("package.json"));
+
+  assert.match(manifest.dependencies["@assistant-ui/react"], /^\^0\./);
+  assert.match(manifest.dependencies["@assistant-ui/react-ai-sdk"], /^\^1\./);
+  assert.match(manifest.dependencies.ai, /^\^6\./);
+  assert.match(manifest.dependencies["@ai-sdk/react"], /^\^3\./);
+  assert.match(manifest.dependencies.react, /^\^19\.2\./);
+  assert.match(manifest.dependencies["react-dom"], /^\^19\.2\./);
+  assert.match(manifest.devDependencies["@types/react"], /^\^19\.2\./);
+});
+
 test("Clarise planner asks for missing fields and supports small schema-complete batches", async () => {
-  const { planClariseResponse } = await loadTs("lib/clarise-chat.ts", "clarise-chat.cjs");
+  const { normalizeClarisePlan, planClariseResponse } = await loadTs(
+    "lib/clarise-chat.ts",
+    "clarise-chat.cjs",
+  );
 
   const missingPlan = planClariseResponse([{ role: "user", content: "Create a milestone" }]);
   assert.equal(missingPlan.artifactDrafts.length, 0);
@@ -100,6 +127,24 @@ test("Clarise planner asks for missing fields and supports small schema-complete
       .filter((draft) => ["decision", "plan", "requirements"].includes(draft.kind))
       .every((draft) => draft.linkToBatchMilestone === true),
   );
+
+  const codexPlan = normalizeClarisePlan({
+    assistantText: "Saving milestone.",
+    artifactDrafts: [
+      {
+        kind: "milestone",
+        title: "Codex extraction",
+        body: "# Milestone - Codex extraction",
+        metadata: { private: false },
+        confirmation: "Created private milestone.",
+      },
+    ],
+    missingFields: [],
+  });
+
+  assert.equal(codexPlan.artifactDrafts.length, 1);
+  assert.equal(codexPlan.artifactDrafts[0].metadata.private, true);
+  assert.equal(codexPlan.artifactDrafts[0].metadata.source, "clarise_chat");
 });
 
 test("spec workspace supports private task brief artifacts", async () => {

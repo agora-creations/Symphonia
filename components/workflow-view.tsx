@@ -192,7 +192,6 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
                 return (
                   <button
                     key={template.id}
-                    id={template.id === "review-first" ? "repository-rules-card" : undefined}
                     onClick={() => createFromTemplate(template.id)}
                     disabled={pending != null}
                     className="group rounded-[10px] border bg-card p-3 text-left shadow-[var(--elevation-card)] transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-[var(--elevation-card-hover)] disabled:cursor-not-allowed disabled:opacity-50"
@@ -216,7 +215,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-3">
         <div className="text-sm">
-          <span id="repository-rules-card" className="text-[15px] font-bold tracking-[-0.02em]">
+          <span className="text-[15px] font-bold tracking-[-0.02em]">
             Repository rules
           </span>
         </div>

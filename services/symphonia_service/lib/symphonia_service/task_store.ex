@@ -64,6 +64,7 @@ defmodule SymphoniaService.TaskStore do
         "priority" => priority_from_attrs(attrs),
         "project" => string_or_nil(Map.get(attrs, "project")),
         "assistant" => string_or_nil(Map.get(attrs, "assistant")),
+        "labels" => labels_from_attrs(attrs),
         "files_changed" => [],
         "updated_at" => now()
       }
@@ -175,6 +176,7 @@ defmodule SymphoniaService.TaskStore do
       "repo" => repository["key"],
       "path" => Path.relative_to(path, repository["path"]),
       "body" => parsed.body,
+      "labels" => public_labels(frontmatter["labels"], frontmatter["status"]),
       :repository => repository,
       :file_path => path,
       :frontmatter => frontmatter,
@@ -277,6 +279,61 @@ defmodule SymphoniaService.TaskStore do
       value when value in ["urgent", "high", "medium", "low", "no-priority"] -> value
       _ -> "no-priority"
     end
+  end
+
+  defp labels_from_attrs(attrs) do
+    labels =
+      case Map.get(attrs, "labels") do
+        values when is_list(values) -> values
+        value when is_binary(value) -> String.split(value, ",")
+        _ -> []
+      end
+      |> Enum.map(&to_string/1)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    case labels do
+      [] -> nil
+      _ -> labels
+    end
+  end
+
+  defp public_labels(labels, status) do
+    labels =
+      labels
+      |> List.wrap()
+      |> Enum.map(&to_string/1)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.map(fn label ->
+        %{"id" => label_id(label), "name" => label, "color" => "text-sky-500"}
+      end)
+
+    case labels do
+      [] -> status_label(status)
+      _ -> labels
+    end
+  end
+
+  defp status_label(status) do
+    name =
+      case status do
+        "in_progress" -> "In Progress"
+        "in_review" -> "In Review"
+        "paused" -> "Paused"
+        "completed" -> "Completed"
+        "canceled" -> "Canceled"
+        _ -> "To-do"
+      end
+
+    [%{"id" => to_string(status || "todo"), "name" => name, "color" => "text-zinc-500"}]
+  end
+
+  defp label_id(label) do
+    label
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "-")
+    |> String.trim("-")
   end
 
   defp generated_metadata(attrs) do
