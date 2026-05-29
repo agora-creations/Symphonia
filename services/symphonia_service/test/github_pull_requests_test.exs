@@ -40,15 +40,40 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     end
 
     def get_pull_request("installation-token", "agora-creations", "symphonia", 456) do
-      {:ok,
-       %{
-         "number" => 456,
-         "html_url" => "https://github.com/agora-creations/symphonia/pull/456",
-         "state" => "closed",
-         "merged" => true,
-         "head" => %{"ref" => "task-branch"},
-         "base" => %{"ref" => "main"}
-       }}
+      case Application.get_env(:symphonia_service, :github_pull_request_stub_state, :merged) do
+        :open ->
+          {:ok,
+           %{
+             "number" => 456,
+             "html_url" => "https://github.com/agora-creations/symphonia/pull/456",
+             "state" => "open",
+             "merged" => false,
+             "head" => %{"ref" => "task-branch"},
+             "base" => %{"ref" => "main"}
+           }}
+
+        :closed ->
+          {:ok,
+           %{
+             "number" => 456,
+             "html_url" => "https://github.com/agora-creations/symphonia/pull/456",
+             "state" => "closed",
+             "merged" => false,
+             "head" => %{"ref" => "task-branch"},
+             "base" => %{"ref" => "main"}
+           }}
+
+        _ ->
+          {:ok,
+           %{
+             "number" => 456,
+             "html_url" => "https://github.com/agora-creations/symphonia/pull/456",
+             "state" => "closed",
+             "merged" => true,
+             "head" => %{"ref" => "task-branch"},
+             "base" => %{"ref" => "main"}
+           }}
+      end
     end
 
     def update_issue("installation-token", "agora-creations", "symphonia", 123, payload) do
@@ -87,6 +112,7 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
       restore_env("SYMPHONIA_GITHUB_APP_PRIVATE_KEY_PATH", previous_private_key)
       Application.delete_env(:symphonia_service, :github_client)
       Application.delete_env(:symphonia_service, :github_home)
+      Application.delete_env(:symphonia_service, :github_pull_request_stub_state)
       File.rm_rf(root)
     end)
 
@@ -133,10 +159,37 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     assert task["status"] == "in_review"
     assert task["githubPrState"] == "open"
     assert task["githubPr"] == "https://github.com/agora-creations/symphonia/pull/456"
+    assert task["reviewApproved"] == true
     assert File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"])) =~ "github:"
 
     assert File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"])) =~
              "head_branch: task-branch"
+  end
+
+  test "opening a pull request requires an in-review task", %{
+    repo_path: repo_path,
+    repository: repository
+  } do
+    write_task(repo_path, "task-branch", true, status: "todo")
+
+    assert_raise ArgumentError, "A task must be in review before opening a pull request.", fn ->
+      PullRequests.open_from_task(repository, "SYM-1")
+    end
+
+    task_markdown = File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]))
+    refute task_markdown =~ "html_url"
+    refute task_markdown =~ "https://github.com/agora-creations/symphonia/pull/456"
+  end
+
+  test "opening a pull request requires a handoff", %{
+    repo_path: repo_path,
+    repository: repository
+  } do
+    write_task(repo_path, "task-branch", true, handoff: false)
+
+    assert_raise ArgumentError, "No review handoff exists for this task.", fn ->
+      PullRequests.open_from_task(repository, "SYM-1")
+    end
   end
 
   test "returns a plain error when the head branch is missing on GitHub", %{
@@ -150,6 +203,17 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     end
   end
 
+  test "opening a pull request requires a review branch in the handoff", %{
+    repo_path: repo_path,
+    repository: repository
+  } do
+    write_task(repo_path, nil)
+
+    assert_raise ArgumentError, "No review branch was found for this handoff.", fn ->
+      PullRequests.open_from_task(repository, "SYM-1")
+    end
+  end
+
   test "opening a pull request is approval-gated", %{
     repo_path: repo_path,
     repository: repository
@@ -159,6 +223,37 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     assert_raise ArgumentError, "Approve the handoff before opening a pull request.", fn ->
       PullRequests.open_from_task(repository, "SYM-1")
     end
+  end
+
+  test "opening a pull request requires a linked GitHub repository", %{
+    repo_path: repo_path,
+    repository: repository
+  } do
+    write_task(repo_path, "task-branch")
+    unlinked_repository = Map.delete(repository, "github")
+
+    assert_raise ArgumentError,
+                 "Link this local repository to GitHub before opening a pull request.",
+                 fn ->
+                   PullRequests.open_from_task(unlinked_repository, "SYM-1")
+                 end
+  end
+
+  test "refreshing an open pull request keeps the task in review", %{
+    repo_path: repo_path,
+    repository: repository
+  } do
+    Application.put_env(:symphonia_service, :github_pull_request_stub_state, :open)
+    write_task(repo_path, "task-branch")
+    PullRequests.open_from_task(repository, "SYM-1")
+
+    result = PullRequests.refresh_with_result(repository, "SYM-1")
+    task = result["task"]
+
+    assert task["status"] == "in_review"
+    assert task["githubPrState"] == "open"
+    assert result["refreshResult"]["state"] == "open"
+    assert result["refreshResult"]["message"] == "Pull request is still open."
   end
 
   test "merged pull request completes task and closes linked issue", %{
@@ -176,6 +271,30 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     assert task["body"] =~ "Pull request merged."
     assert task["body"] =~ "Task completed."
     assert task["body"] =~ "Linked GitHub issue closed automatically."
+  end
+
+  test "closed unmerged pull request stays in review with clear next action", %{
+    repo_path: repo_path,
+    repository: repository
+  } do
+    Application.put_env(:symphonia_service, :github_pull_request_stub_state, :closed)
+    write_task(repo_path, "task-branch")
+    PullRequests.open_from_task(repository, "SYM-1")
+
+    result = PullRequests.refresh_with_result(repository, "SYM-1")
+    task = result["task"]
+
+    assert task["status"] == "in_review"
+    assert task["githubPrState"] == "closed"
+
+    assert task["nextReviewAction"] ==
+             "Pull request was closed without merge. Task remains in review."
+
+    refute task["body"] =~ "Task completed."
+    assert result["refreshResult"]["state"] == "closed"
+
+    assert result["refreshResult"]["message"] ==
+             "Pull request was closed without merge. Task remains in review."
   end
 
   test "GitHub credentials are never written to repository files", %{
@@ -202,17 +321,36 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     end
   end
 
-  defp write_task(repo_path, head_branch, approved \\ true) do
+  defp write_task(repo_path, head_branch, approved \\ true, opts \\ []) do
+    status = Keyword.get(opts, :status, "in_review")
+    handoff? = Keyword.get(opts, :handoff, true)
+
+    handoff =
+      if handoff? do
+        """
+        handoff:
+          summary: Approved handoff.
+          files_changed:
+            - app/page.tsx
+          next_review_action: Approve or request changes.
+        #{if head_branch, do: "  head_branch: #{head_branch}\n", else: ""}  base_branch: main
+          curated_summary_path: symphonia/run-summaries/SYM-1.md
+        """
+      else
+        ""
+      end
+
     File.write!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]), """
     ---
     key: SYM-1
     title: GitHub PR task
-    status: in_review
+    status: #{status}
     priority: high
     review_approved: #{approved}
     review_state: #{if(approved, do: "approved", else: "changes_requested")}
     files_changed:
       - app/page.tsx
+    #{handoff}
     github:
       issue:
         owner: agora-creations
@@ -221,7 +359,6 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
         url: https://github.com/agora-creations/symphonia/issues/123
         state: open
       pull_request:
-        head_branch: #{head_branch}
         base_branch: main
     ---
 

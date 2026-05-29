@@ -219,6 +219,11 @@ defmodule SymphoniaService.CodingAssistant do
           "Assign to Coding Assistant is available for To-do and Paused tasks."
   end
 
+  defp ensure_reviewable!(%{"status" => "in_review", "githubPrState" => "open"}) do
+    raise ArgumentError,
+          "This task already has an open pull request. Request changes on the PR, or close the PR before continuing in Symphonia."
+  end
+
   defp ensure_reviewable!(%{"status" => "in_review"}), do: :ok
 
   defp ensure_reviewable!(_task) do

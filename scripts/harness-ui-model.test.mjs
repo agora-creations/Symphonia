@@ -24,11 +24,18 @@ const {
   activeRunPollingTarget,
   automationLabel,
   compactRunBadge,
+  canOpenPullRequest,
+  canRequestChanges,
   daemonLabel,
   harnessLabel,
   harnessStatusForTask,
   isReviewReady,
+  prStateLabel,
   reviewHandoffForTask,
+  reviewGateLabel,
+  reviewGateState,
+  reviewGateTone,
+  reviewPrimaryAction,
   runDisplayForTask,
   runOriginLabel,
   runTimelineForTask,
@@ -138,6 +145,77 @@ test("run experience helpers derive public origin, state, and safe paths", () =>
   assert.equal(safeReviewBranch("/Users/example/private"), undefined);
   assert.equal(safeSummaryPath("symphonia/run-summaries/sym-1.md"), "symphonia/run-summaries/sym-1.md");
   assert.equal(safeSummaryPath("/Users/example/private/summary.md"), undefined);
+});
+
+test("review gate helpers derive review state and safe actions from public task fields", () => {
+  const handoff = {
+    summary: "Ready",
+    filesChanged: ["app/page.tsx"],
+    headBranch: "symphonia/task/sym-1",
+    baseBranch: "main",
+  };
+
+  const needsReview = task({ status: "in_review", handoff });
+  assert.equal(reviewGateState(needsReview), "needs_review");
+  assert.equal(reviewGateLabel(needsReview), "Needs review");
+  assert.equal(reviewGateTone(reviewGateState(needsReview)), "neutral");
+  assert.equal(reviewPrimaryAction(needsReview), "approve");
+  assert.equal(canOpenPullRequest(needsReview), false);
+  assert.equal(canRequestChanges(needsReview), true);
+
+  const approved = task({ status: "in_review", handoff, reviewApproved: true });
+  assert.equal(reviewGateState(approved), "approved_ready_for_pr");
+  assert.equal(reviewGateLabel(approved), "Approved - ready to open PR");
+  assert.equal(reviewGateTone(reviewGateState(approved)), "ready");
+  assert.equal(reviewPrimaryAction(approved), "open_pr");
+  assert.equal(canOpenPullRequest(approved), true);
+  assert.equal(canRequestChanges(approved), true);
+
+  const prOpen = task({
+    status: "in_review",
+    handoff,
+    reviewApproved: true,
+    githubPr: "https://github.com/agora-creations/symphonia/pull/1",
+    githubPrState: "open",
+  });
+  assert.equal(reviewGateState(prOpen), "pr_open");
+  assert.equal(reviewPrimaryAction(prOpen), "refresh_pr");
+  assert.equal(canOpenPullRequest(prOpen), false);
+  assert.equal(canRequestChanges(prOpen), false);
+  assert.equal(prStateLabel(prOpen), "Open");
+
+  const merged = task({
+    status: "completed",
+    handoff,
+    githubPr: "https://github.com/agora-creations/symphonia/pull/1",
+    githubPrState: "merged",
+  });
+  assert.equal(reviewGateState(merged), "pr_merged");
+  assert.equal(reviewGateLabel(merged), "PR merged - completed");
+  assert.equal(reviewPrimaryAction(merged), "view_pr");
+  assert.equal(prStateLabel(merged), "Merged");
+
+  const closed = task({
+    status: "in_review",
+    handoff,
+    githubPr: "https://github.com/agora-creations/symphonia/pull/1",
+    githubPrState: "closed",
+  });
+  assert.equal(reviewGateState(closed), "pr_closed");
+  assert.equal(reviewGateTone(reviewGateState(closed)), "warning");
+  assert.equal(reviewPrimaryAction(closed), "request_changes");
+  assert.equal(prStateLabel(closed), "Closed without merge");
+
+  assert.equal(
+    reviewGateState(
+      task({
+        status: "in_progress",
+        run: { id: "run-1", state: "running", kind: "review_continuation" },
+      }),
+    ),
+    "changes_requested",
+  );
+  assert.equal(reviewGateState(task({ status: "todo" })), "not_reviewable");
 });
 
 test("blocked, in-review, polling, timeline, and handoff displays are derived without raw logs", () => {
@@ -264,6 +342,8 @@ test("task page copy separates Clarise planning from Codex implementation and hi
   assert.match(taskPage, /Codex is working/);
   assert.match(taskPage, /Coding Assistant Run/);
   assert.match(taskPage, /Review Handoff/);
+  assert.match(taskPage, /Review Decision/);
+  assert.match(taskPage, /Pull Request/);
   assert.match(taskPage, /Origin/);
   assert.match(taskPage, /Why it started/);
   assert.match(taskPage, /Current state/);
@@ -273,11 +353,26 @@ test("task page copy separates Clarise planning from Codex implementation and hi
   assert.match(taskPage, /Changed files/);
   assert.match(taskPage, /Validation evidence/);
   assert.match(taskPage, /Next action/);
+  assert.match(taskPage, /No automatic merge will happen/);
+  assert.match(taskPage, /Symphonia will not merge it automatically/);
+  assert.match(taskPage, /Base branch/);
+  assert.match(taskPage, /Head branch/);
+  assert.match(taskPage, /Changed files/);
+  assert.match(taskPage, /Request changes on the PR, or close the PR before continuing in Symphonia/);
   assert.match(taskPage, /Codex is continuing the task/);
+  assert.match(taskPage, /Codex will continue from this review note/);
   assert.match(taskPage, /Codex ran, but no reviewable files were produced/);
   assert.doesNotMatch(taskPage, /task\.run\.provider/);
   assert.doesNotMatch(taskPage, /task\.run\.workspacePath/);
   assert.doesNotMatch(taskPage, /task\.run\.codexThreadId/);
   assert.doesNotMatch(taskPage, /event\.threadId/);
   assert.doesNotMatch(taskPage, /event\.turnId/);
+});
+
+test("task board uses shared review gate helpers without opening SSE streams", async () => {
+  const tasksView = await readFile(new URL("../components/tasks-view.tsx", import.meta.url), "utf8");
+
+  assert.match(tasksView, /reviewGateLabel/);
+  assert.match(tasksView, /reviewGateState/);
+  assert.doesNotMatch(tasksView, /EventSource/);
 });

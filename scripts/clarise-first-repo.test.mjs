@@ -38,7 +38,8 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
 
   assert.match(dashboard, /router\.push\(`\/r\/\$\{openedRepository\.key\.toLowerCase\(\)\}`\)/);
   assert.match(dashboard, /const href = `\/r\/\$\{repository\.key\.toLowerCase\(\)\}`/);
-  assert.match(dashboard, /Ask Clarise/);
+  assert.doesNotMatch(dashboard, /openDashboardClarise/);
+  assert.doesNotMatch(dashboard, /aria-label="Ask Clarise"/);
   assert.match(dashboard, /Clarise creates the workspace files/);
   assert.match(dashboard, /Use Clarise to create workspace files/);
   assert.doesNotMatch(dashboard, /openedRepository\.key\.toLowerCase\(\)\}\/tasks/);

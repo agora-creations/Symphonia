@@ -6,6 +6,6 @@ defmodule SymphoniaService.GitHub.Sync do
   alias SymphoniaService.GitHub.PullRequests
 
   def refresh_pull_request(repository, task_key) do
-    PullRequests.refresh(repository, task_key)
+    PullRequests.refresh_with_result(repository, task_key)
   end
 end

@@ -42,7 +42,6 @@ import {
   Menu,
   MessageSquareText,
   Milestone,
-  PanelLeftClose,
   Plus,
   Send,
   ShieldCheck,
@@ -251,11 +250,7 @@ export function ClariseRepoHome({ repoKey }: { repoKey: string }) {
           onClick={() => setSidebarOpen(false)}
         />
 
-        <ClariseThreadSidebar
-          repoKey={repoKey}
-          open={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-        />
+        <ClariseThreadSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
@@ -622,15 +617,7 @@ function createClariseThreadListAdapter(prefix: string): RemoteThreadListAdapter
   };
 }
 
-function ClariseThreadSidebar({
-  repoKey,
-  open,
-  onClose,
-}: {
-  repoKey: string;
-  open: boolean;
-  onClose: () => void;
-}) {
+function ClariseThreadSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const threadCount = useAuiState((state) => state.threads.threadIds.length);
   const isLoading = useAuiState((state) => state.threads.isLoading);
 
@@ -641,24 +628,6 @@ function ClariseThreadSidebar({
         open ? "translate-x-0" : "-translate-x-full",
       )}
     >
-      <div className="flex h-[65px] items-center gap-3 border-b border-sidebar-border px-3">
-        <div className="grid h-8 w-8 place-items-center rounded-[8px] bg-brand-accent-soft text-brand-accent-text">
-          <Sparkles className="h-4 w-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-semibold">Clarise</p>
-          <p className="truncate text-[11px] text-muted-foreground">{repoKey} workspace</p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close threads"
-          className="grid h-8 w-8 place-items-center rounded-[8px] text-muted-foreground transition hover:bg-sidebar-accent hover:text-foreground md:hidden"
-        >
-          <PanelLeftClose className="h-4 w-4" />
-        </button>
-      </div>
-
       <ThreadListPrimitive.Root className="min-h-0 flex-1 overflow-y-auto p-2">
         <ThreadListPrimitive.New
           className="mb-2 flex h-9 w-full items-center gap-2 rounded-[8px] border border-sidebar-border bg-sidebar-accent px-3 text-left text-[13px] font-medium text-foreground transition hover:bg-accent data-[active=true]:border-primary/40"

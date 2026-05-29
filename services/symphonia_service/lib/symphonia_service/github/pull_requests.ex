@@ -13,9 +13,11 @@ defmodule SymphoniaService.GitHub.PullRequests do
   def open_from_task(repository, task_key) do
     task = get_task!(repository, task_key)
     frontmatter = task.frontmatter
+    ensure_in_review!(task)
+    ensure_handoff!(task, frontmatter)
     ensure_approved!(task, frontmatter)
     github_repo = github_repo!(repository, frontmatter)
-    head_branch = head_branch!(frontmatter)
+    head_branch = head_branch!(task, frontmatter)
     base_branch = base_branch(frontmatter, github_repo)
     token = Auth.token_for_repository(github_repo["owner"], github_repo["name"])
 
@@ -55,12 +57,16 @@ defmodule SymphoniaService.GitHub.PullRequests do
   end
 
   def refresh(repository, task_key) do
+    refresh_with_result(repository, task_key)["task"]
+  end
+
+  def refresh_with_result(repository, task_key) do
     task = get_task!(repository, task_key)
     frontmatter = task.frontmatter
     github = github_metadata(frontmatter)
-    github_repo = github_repo!(repository, frontmatter)
     pr = Map.get(github, "pull_request") || %{}
     number = pr["number"] || raise ArgumentError, "This task does not have an open pull request."
+    github_repo = github_repo!(repository, frontmatter)
     token = Auth.token_for_repository(github_repo["owner"], github_repo["name"])
 
     case client().get_pull_request(token, github_repo["owner"], github_repo["name"], number) do
@@ -80,18 +86,24 @@ defmodule SymphoniaService.GitHub.PullRequests do
             "base_branch" => get_in(fresh_pr, ["base", "ref"]) || pr["base_branch"]
           })
 
-        if merged? do
-          complete_after_merge(repository, task, github_repo, github, token)
-        else
-          TaskStore.patch_task(repository, task_key, %{
-            "frontmatter" => %{
-              "status" => "in_review",
-              "github" => github,
-              "next_step" => "refresh_pr_status",
-              "next_review_action" => "Review or merge the pull request to continue the workflow."
-            }
-          })
-        end
+        task =
+          if merged? do
+            complete_after_merge(repository, task, github_repo, github, token)
+          else
+            TaskStore.patch_task(repository, task_key, %{
+              "frontmatter" => %{
+                "status" => "in_review",
+                "github" => github,
+                "next_step" => "refresh_pr_status",
+                "next_review_action" => next_review_action_for_pr_state(pr_state)
+              }
+            })
+          end
+
+        %{
+          "task" => task,
+          "refreshResult" => refresh_result(pr_state)
+        }
 
       {:error, payload} ->
         raise ArgumentError, Map.get(payload, "message", "Could not refresh pull request.")
@@ -151,6 +163,20 @@ defmodule SymphoniaService.GitHub.PullRequests do
     end
   end
 
+  defp ensure_in_review!(%{"status" => "in_review"}), do: :ok
+
+  defp ensure_in_review!(_task) do
+    raise ArgumentError, "A task must be in review before opening a pull request."
+  end
+
+  defp ensure_handoff!(task, frontmatter) do
+    handoff = task["handoff"] || frontmatter["handoff"]
+
+    unless is_map(handoff) do
+      raise ArgumentError, "No review handoff exists for this task."
+    end
+  end
+
   defp ensure_approved!(task, frontmatter) do
     unless task["reviewApproved"] or frontmatter["review_state"] == "approved" do
       raise ArgumentError, "Approve the handoff before opening a pull request."
@@ -161,8 +187,8 @@ defmodule SymphoniaService.GitHub.PullRequests do
     repo_from_task = get_in(github_metadata(frontmatter), ["repo"]) || %{}
     link = RepositoryLink.link(repository) || %{}
 
-    owner = repo_from_task["owner"] || link["owner"]
-    name = repo_from_task["name"] || link["name"]
+    owner = link["owner"]
+    name = link["name"]
 
     if blank?(owner) or blank?(name) do
       raise ArgumentError, "Link this local repository to GitHub before opening a pull request."
@@ -171,9 +197,9 @@ defmodule SymphoniaService.GitHub.PullRequests do
     %{
       "owner" => owner,
       "name" => name,
-      "url" => repo_from_task["url"] || link["url"],
+      "url" => link["url"] || repo_from_task["url"],
       "default_branch" =>
-        repo_from_task["default_branch"] || link["defaultBranch"] || link["default_branch"]
+        link["defaultBranch"] || link["default_branch"] || repo_from_task["default_branch"]
     }
   end
 
@@ -232,15 +258,24 @@ defmodule SymphoniaService.GitHub.PullRequests do
     })
   end
 
-  defp head_branch!(frontmatter) do
-    github_branch = get_in(github_metadata(frontmatter), ["pull_request", "head_branch"])
-    handoff_branch = get_in(frontmatter, ["handoff", "head_branch"])
+  defp head_branch!(task, frontmatter) do
+    handoff_branch =
+      get_in(frontmatter, ["handoff", "head_branch"]) ||
+        get_in(task, ["handoff", "headBranch"])
+
+    run_branch =
+      get_in(frontmatter, ["run", "review_branch"]) ||
+        get_in(task, ["run", "reviewBranch"])
 
     branch =
-      github_branch || handoff_branch || frontmatter["handoff_head_branch"] ||
+      handoff_branch || run_branch || frontmatter["handoff_head_branch"] ||
         frontmatter["github_head_branch"]
 
-    if blank?(branch), do: raise(ArgumentError, @push_branch_error), else: branch
+    if blank?(branch) do
+      raise ArgumentError, "No review branch was found for this handoff."
+    else
+      branch
+    end
   end
 
   defp base_branch(frontmatter, github_repo) do
@@ -249,6 +284,34 @@ defmodule SymphoniaService.GitHub.PullRequests do
       github_repo["default_branch"] ||
       "main"
   end
+
+  defp next_review_action_for_pr_state("closed") do
+    "Pull request was closed without merge. Task remains in review."
+  end
+
+  defp next_review_action_for_pr_state(_state) do
+    "Review or merge the pull request to continue the workflow."
+  end
+
+  defp refresh_result(pr_state) do
+    %{
+      "state" => public_refresh_state(pr_state),
+      "message" => refresh_message(pr_state),
+      "refreshedAt" => now()
+    }
+  end
+
+  defp public_refresh_state(state) when state in ["open", "merged", "closed"], do: state
+  defp public_refresh_state(_state), do: "unknown"
+
+  defp refresh_message("open"), do: "Pull request is still open."
+  defp refresh_message("merged"), do: "Pull request was merged. Task completed."
+
+  defp refresh_message("closed") do
+    "Pull request was closed without merge. Task remains in review."
+  end
+
+  defp refresh_message(_state), do: "Could not confirm pull request state."
 
   defp pr_title(task), do: "#{task["key"]}: #{task["title"]}"
 

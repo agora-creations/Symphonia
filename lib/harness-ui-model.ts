@@ -28,6 +28,15 @@ export interface ReviewHandoffView {
   proofNeeded: string[];
 }
 
+export type ReviewGateState =
+  | "needs_review"
+  | "approved_ready_for_pr"
+  | "pr_open"
+  | "pr_merged"
+  | "pr_closed"
+  | "changes_requested"
+  | "not_reviewable";
+
 export function automationLabel(automation?: RepositoryAutomationState | null): string {
   return automation?.enabled ? "Automation on" : "Automation off";
 }
@@ -85,6 +94,113 @@ export function terminalRunStateLabel(run?: CodingAssistantRun | null): string |
 
 export function isReviewReady(task: ServiceTask): boolean {
   return task.status === "in_review" && Boolean(task.handoff);
+}
+
+export function reviewGateState(task: ServiceTask): ReviewGateState {
+  if (task.status === "completed" && task.githubPrState === "merged") {
+    return "pr_merged";
+  }
+
+  if (task.status === "in_review" && task.githubPrState === "open") {
+    return "pr_open";
+  }
+
+  if (task.status === "in_review" && task.githubPrState === "closed") {
+    return "pr_closed";
+  }
+
+  if (task.status === "in_review" && task.reviewApproved && task.handoff) {
+    return "approved_ready_for_pr";
+  }
+
+  if (task.status === "in_review" && task.handoff) {
+    return "needs_review";
+  }
+
+  if (task.status === "in_progress" && task.run?.kind === "review_continuation") {
+    return "changes_requested";
+  }
+
+  return "not_reviewable";
+}
+
+export function reviewGateLabel(task: ServiceTask): string {
+  switch (reviewGateState(task)) {
+    case "needs_review":
+      return "Needs review";
+    case "approved_ready_for_pr":
+      return "Approved - ready to open PR";
+    case "pr_open":
+      return "PR open - waiting for merge";
+    case "pr_merged":
+      return "PR merged - completed";
+    case "pr_closed":
+      return "PR closed without merge";
+    case "changes_requested":
+      return "Changes requested - Codex continuing";
+    case "not_reviewable":
+      return "Not reviewable";
+  }
+}
+
+export function reviewGateTone(state: ReviewGateState): "neutral" | "ready" | "warning" {
+  switch (state) {
+    case "approved_ready_for_pr":
+    case "pr_merged":
+      return "ready";
+    case "pr_closed":
+      return "warning";
+    default:
+      return "neutral";
+  }
+}
+
+export function reviewPrimaryAction(
+  task: ServiceTask,
+): "approve" | "request_changes" | "open_pr" | "refresh_pr" | "view_pr" | null {
+  switch (reviewGateState(task)) {
+    case "needs_review":
+      return "approve";
+    case "approved_ready_for_pr":
+      return "open_pr";
+    case "pr_open":
+      return "refresh_pr";
+    case "pr_merged":
+      return task.githubPr ? "view_pr" : null;
+    case "pr_closed":
+      return canRequestChanges(task) ? "request_changes" : task.githubPr ? "view_pr" : null;
+    case "changes_requested":
+    case "not_reviewable":
+      return null;
+  }
+}
+
+export function canOpenPullRequest(task: ServiceTask): boolean {
+  return reviewGateState(task) === "approved_ready_for_pr";
+}
+
+export function canRequestChanges(task: ServiceTask): boolean {
+  return (
+    task.status === "in_review" &&
+    Boolean(task.handoff) &&
+    task.githubPrState !== "open" &&
+    task.githubPrState !== "merged"
+  );
+}
+
+export function prStateLabel(task: ServiceTask): string | undefined {
+  switch (task.githubPrState) {
+    case "open":
+      return "Open";
+    case "merged":
+      return "Merged";
+    case "closed":
+      return "Closed without merge";
+    case undefined:
+      return undefined;
+    default:
+      return "Unknown";
+  }
 }
 
 export function harnessStatusForTask(

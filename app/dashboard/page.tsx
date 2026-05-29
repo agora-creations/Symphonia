@@ -177,15 +177,6 @@ export default function DashboardPage() {
     window.location.assign(connectHref);
   };
 
-  const openDashboardClarise = () => {
-    const repository = repositories[0];
-    if (!repository) {
-      setError("Connect a repository first.");
-      return;
-    }
-    router.push(`/r/${repository.key.toLowerCase()}`);
-  };
-
   const confirmRemoval = async () => {
     if (!pendingRemoval) return;
     const repository = pendingRemoval;
@@ -269,15 +260,6 @@ export default function DashboardPage() {
           >
             <Github className="h-4 w-4" />
             Connect repo
-          </button>
-          <button
-            onClick={openDashboardClarise}
-            disabled={repositories.length === 0}
-            title={repositories.length === 0 ? "Connect a repository first" : "Ask Clarise"}
-            className="inline-grid h-9 w-9 place-items-center rounded-[8px] border bg-card text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
-            aria-label="Ask Clarise"
-          >
-            <Sparkles className="h-4 w-4" />
           </button>
         </div>
       </header>

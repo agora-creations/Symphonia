@@ -475,8 +475,13 @@ defmodule SymphoniaService.HTTPServer do
 
       ["api", "repositories", repo, "tasks", task_key, "refresh-pr"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
-        task = Sync.refresh_pull_request(repository, task_key)
-        {200, %{"task" => public_task(task)}}
+        result = Sync.refresh_pull_request(repository, task_key)
+
+        {200,
+         %{
+           "task" => public_task(result["task"]),
+           "refreshResult" => result["refreshResult"]
+         }}
 
       _ ->
         {404, %{"error" => "Not found"}}

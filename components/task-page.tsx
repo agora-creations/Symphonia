@@ -14,6 +14,7 @@ import {
 import {
   TASK_STATUS_LABELS,
   pausedReasonLabel,
+  type PullRequestRefreshResult,
   type ReviewNote,
   type CodingAssistantRun,
   type CodingAssistantRunEvent,
@@ -26,9 +27,15 @@ import { useClarise } from "@/components/clarise";
 import { cn } from "@/lib/utils";
 import {
   activeRunPollingTarget,
+  canOpenPullRequest,
+  canRequestChanges,
   isActiveRun,
   isReviewReady,
+  prStateLabel,
   reviewHandoffForTask,
+  reviewGateLabel,
+  reviewGateState,
+  reviewGateTone,
   runDisplayForTask,
   runOriginLabel,
   runTimelineForTask,
@@ -119,14 +126,24 @@ async function openPullRequest(repoKey: string, taskKey: string): Promise<Servic
   return data.task;
 }
 
-async function refreshPullRequest(repoKey: string, taskKey: string): Promise<ServiceTask> {
+async function refreshPullRequest(
+  repoKey: string,
+  taskKey: string,
+): Promise<{ task: ServiceTask; refreshResult: PullRequestRefreshResult }> {
   const res = await fetch(
     `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(taskKey)}/refresh-pr`,
     { method: "POST" },
   );
-  const data = (await res.json()) as { task?: ServiceTask; error?: string };
+  const data = (await res.json()) as {
+    task?: ServiceTask;
+    refreshResult?: PullRequestRefreshResult;
+    error?: string;
+  };
   if (!res.ok || !data.task) throw new Error(data.error ?? "Could not refresh pull request");
-  return data.task;
+  return {
+    task: data.task,
+    refreshResult: data.refreshResult ?? refreshResultForTask(data.task),
+  };
 }
 
 async function startCodingAssistantRun(
@@ -146,6 +163,30 @@ async function startCodingAssistantRun(
   const data = (await res.json()) as { task?: ServiceTask; error?: string };
   if (!res.ok || !data.task) throw new Error(data.error ?? "Could not start Codex");
   return data.task;
+}
+
+function refreshResultForTask(task: ServiceTask): PullRequestRefreshResult {
+  const state =
+    task.githubPrState === "open" ||
+    task.githubPrState === "merged" ||
+    task.githubPrState === "closed"
+      ? task.githubPrState
+      : "unknown";
+
+  const message =
+    state === "open"
+      ? "Pull request is still open."
+      : state === "merged"
+        ? "Pull request was merged. Task completed."
+        : state === "closed"
+          ? "Pull request was closed without merge. Task remains in review."
+          : "Could not confirm pull request state.";
+
+  return {
+    state,
+    message,
+    refreshedAt: new Date().toISOString(),
+  };
 }
 
 async function fetchCodingAssistantRun(
@@ -312,6 +353,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [requestBoxOpen, setRequestBoxOpen] = useState(false);
+  const [openPrConfirmOpen, setOpenPrConfirmOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -333,6 +375,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
         setDirty(false);
         setNotice(null);
         setRequestBoxOpen(false);
+        setOpenPrConfirmOpen(false);
         setFeedback("");
         setFeedbackError(null);
       })
@@ -510,22 +553,43 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     if (action.kind === "view_pr") return;
 
     if (action.kind === "request_changes") {
+      if (!canRequestChanges(task)) {
+        setError(
+          "This task already has an open pull request. Request changes on the PR, or close the PR before continuing in Symphonia.",
+        );
+        return;
+      }
       setRequestBoxOpen(true);
+      setOpenPrConfirmOpen(false);
       setFeedbackError(null);
+      return;
+    }
+
+    if (action.kind === "open_pull_request") {
+      if (!canOpenPullRequest(task)) {
+        setError("Approve the handoff before opening a pull request.");
+        return;
+      }
+      setOpenPrConfirmOpen(true);
+      setRequestBoxOpen(false);
       return;
     }
 
     setPending(action.kind);
     setError(null);
     try {
-      const updated =
-        action.kind === "coding_assistant_run"
-          ? await startCodingAssistantRun(repoKey, task.key)
-          : action.kind === "cancel_run" && task.run
-          ? await cancelCodingAssistantRun(repoKey, task.key, task.run.id)
-          : action.kind === "open_pull_request"
-          ? await openPullRequest(repoKey, task.key)
-          : await refreshPullRequest(repoKey, task.key);
+      let updated: ServiceTask;
+
+      if (action.kind === "coding_assistant_run") {
+        updated = await startCodingAssistantRun(repoKey, task.key);
+      } else if (action.kind === "cancel_run" && task.run) {
+        updated = await cancelCodingAssistantRun(repoKey, task.key, task.run.id);
+      } else {
+        const result = await refreshPullRequest(repoKey, task.key);
+        updated = result.task;
+        setNotice(result.refreshResult.message);
+      }
+
       if (action.kind === "coding_assistant_run") {
         window.dispatchEvent(
           new CustomEvent("symphonia:codexRunStarted", {
@@ -548,6 +612,13 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
 
   const sendChanges = async () => {
     if (!task) return;
+    if (!canRequestChanges(task)) {
+      setError(
+        "This task already has an open pull request. Request changes on the PR, or close the PR before continuing in Symphonia.",
+      );
+      return;
+    }
+
     const trimmed = feedback.trim();
 
     if (!trimmed) {
@@ -575,6 +646,36 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     } catch (err) {
       setNotice(null);
       setError(safeMessage(err, "Could not request changes"));
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const confirmOpenPullRequest = async () => {
+    if (!task) return;
+
+    if (!canOpenPullRequest(task)) {
+      setError("Approve the handoff before opening a pull request.");
+      setOpenPrConfirmOpen(false);
+      return;
+    }
+
+    setPending("open_pull_request");
+    setError(null);
+    setNotice(null);
+
+    try {
+      const updated = await openPullRequest(repoKey, task.key);
+      setTask(updated);
+      setEligibility(await fetchEligibility(repoKey, task.key).catch(() => eligibility));
+      setRunEvents(updated.run?.timeline ?? runEvents);
+      setTitle(updated.title);
+      setBody(updated.body);
+      setDirty(false);
+      setOpenPrConfirmOpen(false);
+      setNotice("Pull request opened. Symphonia will not merge it automatically.");
+    } catch (err) {
+      setError(safeMessage(err, "Could not open pull request"));
     } finally {
       setPending(null);
     }
@@ -744,6 +845,15 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
               </button>
             </div>
 
+            {openPrConfirmOpen && (
+              <OpenPullRequestConfirmation
+                task={task}
+                pending={pending === "open_pull_request"}
+                onCancel={() => setOpenPrConfirmOpen(false)}
+                onConfirm={confirmOpenPullRequest}
+              />
+            )}
+
             {requestBoxOpen && (
               <div className="mt-4 rounded-md border bg-card p-3 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
@@ -813,6 +923,9 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
             task={task}
             eligibility={eligibility}
             runEvents={runEvents}
+            actions={availableActions}
+            pending={pending}
+            onAction={runAction}
           />
         </aside>
       </div>
@@ -825,11 +938,17 @@ function TaskMeta({
   task,
   eligibility,
   runEvents,
+  actions,
+  pending,
+  onAction,
 }: {
   repoKey: string;
   task: ServiceTask;
   eligibility: TaskEligibilityExplanation | null;
   runEvents: CodingAssistantRunEvent[];
+  actions: TaskAction[];
+  pending: string | null;
+  onAction: (action: TaskAction) => void;
 }) {
   const handoff = reviewHandoffForTask(task);
   const timeline = runTimelineForTask(task, runEvents);
@@ -841,6 +960,8 @@ function TaskMeta({
   const runSummaryPath = safeSummaryPath(run?.curatedSummaryPath ?? task.handoff?.curatedSummaryPath);
   const allowedReason = run?.eligibilityReason ?? eligibility?.reason;
   const recoveryMessage = recoveryMessageForTask(task);
+  const gateState = reviewGateState(task);
+  const reviewFocused = task.status === "in_review" && Boolean(task.handoff);
 
   useEffect(() => {
     if (!handoff.summary) return;
@@ -851,178 +972,447 @@ function TaskMeta({
     );
   }, [handoff.summary, repoKey, task.key]);
 
-  return (
-    <div className="space-y-5">
-      <Panel title="Coding Assistant Run">
-        <Section title="Task state">
-          <div className="flex items-center gap-1.5">
-            <TaskStatusIcon status={task.status} />
-            <span>{TASK_STATUS_LABELS[task.status]}</span>
-          </div>
+  const runPanel = (
+    <Panel title="Coding Assistant Run">
+      <Section title="Task state">
+        <div className="flex items-center gap-1.5">
+          <TaskStatusIcon status={task.status} />
+          <span>{TASK_STATUS_LABELS[task.status]}</span>
+        </div>
+      </Section>
+      <Section title="Origin">
+        <div className="inline-flex items-center gap-1.5">
+          <Sparkles className="h-3 w-3 text-violet-500" />
+          <span>{run ? runOriginLabel(run) : "Not assigned"}</span>
+        </div>
+      </Section>
+      <Section title="Why it started">
+        <p className="text-muted-foreground">
+          {allowedReason ?? "No run eligibility reason recorded"}
+        </p>
+      </Section>
+      <Section title="Current state">
+        <div className="space-y-1 text-muted-foreground">
+          <p>{terminalState ?? run?.label ?? run?.state ?? "No run yet"}</p>
+          {runDisplay.step && <p>{runDisplay.step}</p>}
+          {runDisplay.message && <p>{runDisplay.message}</p>}
+        </div>
+      </Section>
+      {recoveryMessage && (
+        <Section title="Recovery">
+          <p className="text-muted-foreground">{recoveryMessage}</p>
         </Section>
-        <Section title="Origin">
-          <div className="inline-flex items-center gap-1.5">
-            <Sparkles className="h-3 w-3 text-violet-500" />
-            <span>{run ? runOriginLabel(run) : "Not assigned"}</span>
-          </div>
+      )}
+      {runBranch && (
+        <Section title="Review branch">
+          <p className="font-mono text-[11px] text-muted-foreground">{runBranch}</p>
         </Section>
-        <Section title="Why it started">
-          <p className="text-muted-foreground">
-            {allowedReason ?? "No run eligibility reason recorded"}
+      )}
+      {runSummaryPath && (
+        <Section title="Curated summary">
+          <p className="font-mono text-[11px] text-muted-foreground">{runSummaryPath}</p>
+        </Section>
+      )}
+      {timeline.length > 0 && (
+        <Section title="Public timeline">
+          <ol className="space-y-2">
+            {timeline.map((event, index) => (
+              <li key={`${event.at ?? "event"}-${index}`} className="border-l pl-2">
+                <p>{event.label ?? "Run event"}</p>
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  {event.at ?? "time not recorded"}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </Section>
+      )}
+    </Panel>
+  );
+
+  const handoffPanel = (
+    <Panel id={handoff.summary ? "review-handoff-panel" : undefined} title="Review Handoff">
+      <Section title="State">
+        <span
+          className={cn(
+            "inline-flex rounded-md border px-2 py-0.5",
+            reviewGateTone(gateState) === "ready"
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              : reviewGateTone(gateState) === "warning"
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                : reviewReady
+                  ? "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                  : "text-muted-foreground",
+          )}
+        >
+          {reviewReady ? reviewGateLabel(task) : "No handoff yet"}
+        </span>
+      </Section>
+      <Section title="Summary">
+        <span className="text-muted-foreground">{handoff.summary ?? "No handoff yet"}</span>
+      </Section>
+      <Section title="Changed files">
+        {handoff.files.length > 0 ? (
+          <ul className="space-y-1 font-mono text-[11px] text-muted-foreground">
+            {handoff.files.map((file) => (
+              <li key={file}>{file}</li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-muted-foreground">No files recorded</span>
+        )}
+      </Section>
+      <Section title="Validation evidence">
+        {handoff.validationEvidence.length > 0 ? (
+          <ul className="space-y-2 text-muted-foreground">
+            {handoff.validationEvidence.map((item) => (
+              <li key={item.label} className="space-y-0.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span>{item.label}</span>
+                  <span
+                    className={cn(
+                      "rounded border px-1.5 py-0.5 text-[10px]",
+                      evidenceTone(item.status),
+                    )}
+                  >
+                    {validationStatusLabel(item.status)}
+                  </span>
+                </div>
+                <p className="text-[11px]">{item.detail}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-muted-foreground">No validation evidence recorded</span>
+        )}
+      </Section>
+      <Section title="Proof needed">
+        {handoff.proofNeeded.length > 0 ? (
+          <ul className="space-y-1 text-muted-foreground">
+            {handoff.proofNeeded.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-muted-foreground">No proof checklist recorded</span>
+        )}
+      </Section>
+      <Section title="Next action">
+        <span className="text-muted-foreground">
+          {handoff.nextReviewAction ?? "No review action recorded"}
+        </span>
+      </Section>
+      {handoff.branch && (
+        <Section title="Review branch">
+          <p className="font-mono text-[11px] text-muted-foreground">{handoff.branch}</p>
+        </Section>
+      )}
+      {handoff.curatedSummaryPath && (
+        <Section title="Curated summary">
+          <p className="font-mono text-[11px] text-muted-foreground">
+            {handoff.curatedSummaryPath}
           </p>
         </Section>
-        <Section title="Current state">
-          <div className="space-y-1 text-muted-foreground">
-            <p>{terminalState ?? run?.label ?? run?.state ?? "No run yet"}</p>
-            {runDisplay.step && <p>{runDisplay.step}</p>}
-            {runDisplay.message && <p>{runDisplay.message}</p>}
-          </div>
-        </Section>
-        {recoveryMessage && (
-          <Section title="Recovery">
-            <p className="text-muted-foreground">{recoveryMessage}</p>
-          </Section>
-        )}
-        {runBranch && (
-          <Section title="Review branch">
-            <p className="font-mono text-[11px] text-muted-foreground">{runBranch}</p>
-          </Section>
-        )}
-        {runSummaryPath && (
-          <Section title="Curated summary">
-            <p className="font-mono text-[11px] text-muted-foreground">{runSummaryPath}</p>
-          </Section>
-        )}
-        {timeline.length > 0 && (
-          <Section title="Public timeline">
-            <ol className="space-y-2">
-              {timeline.map((event, index) => (
-                <li key={`${event.at ?? "event"}-${index}`} className="border-l pl-2">
-                  <p>{event.label ?? "Run event"}</p>
-                  <p className="font-mono text-[10px] text-muted-foreground">
-                    {event.at ?? "time not recorded"}
-                  </p>
-                </li>
-              ))}
-            </ol>
-          </Section>
-        )}
-      </Panel>
+      )}
+    </Panel>
+  );
 
-      <Panel id={handoff.summary ? "review-handoff-panel" : undefined} title="Review Handoff">
-        <Section title="State">
-          <span
-            className={cn(
-              "inline-flex rounded-md border px-2 py-0.5",
-              reviewReady
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                : "text-muted-foreground",
-            )}
-          >
-            {reviewReady ? "Ready for review" : "No handoff yet"}
-          </span>
-        </Section>
-        <Section title="Summary">
-          <span className="text-muted-foreground">{handoff.summary ?? "No handoff yet"}</span>
-        </Section>
-        {handoff.branch && (
-          <Section title="Branch">
-            <p className="font-mono text-[11px] text-muted-foreground">{handoff.branch}</p>
-          </Section>
-        )}
-        {handoff.curatedSummaryPath && (
-          <Section title="Curated summary">
-            <p className="font-mono text-[11px] text-muted-foreground">
-              {handoff.curatedSummaryPath}
-            </p>
-          </Section>
-        )}
-        <Section title="Changed files">
-          {handoff.files.length > 0 ? (
-            <ul className="space-y-1 font-mono text-[11px] text-muted-foreground">
-              {handoff.files.map((file) => (
-                <li key={file}>{file}</li>
-              ))}
-            </ul>
-          ) : (
-            <span className="text-muted-foreground">No files recorded</span>
-          )}
-        </Section>
-        <Section title="Validation evidence">
-          {handoff.validationEvidence.length > 0 ? (
-            <ul className="space-y-2 text-muted-foreground">
-              {handoff.validationEvidence.map((item) => (
-                <li key={item.label} className="space-y-0.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span>{item.label}</span>
-                    <span
-                      className={cn(
-                        "rounded border px-1.5 py-0.5 text-[10px]",
-                        evidenceTone(item.status),
-                      )}
-                    >
-                      {validationStatusLabel(item.status)}
-                    </span>
-                  </div>
-                  <p className="text-[11px]">{item.detail}</p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <span className="text-muted-foreground">No validation evidence recorded</span>
-          )}
-        </Section>
-        <Section title="Proof needed">
-          {handoff.proofNeeded.length > 0 ? (
-            <ul className="space-y-1 text-muted-foreground">
-              {handoff.proofNeeded.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : (
-            <span className="text-muted-foreground">No proof checklist recorded</span>
-          )}
-        </Section>
-        <Section title="Next action">
-          <span className="text-muted-foreground">
-            {handoff.nextReviewAction ?? "No review action recorded"}
-          </span>
-        </Section>
-        <Section title="GitHub issue">
-          {task.githubIssue ? (
-            <a
-              href={task.githubIssue}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted"
-            >
-              <Github className="h-3 w-3" />
-              <span>{task.githubIssueState ?? "linked"}</span>
-              <ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </a>
-          ) : (
-            <span className="text-muted-foreground">Not linked</span>
-          )}
-        </Section>
-        <Section title="Pull request">
-          {task.githubPr ? (
-            <a
-              href={task.githubPr}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted"
-            >
-              <GitPullRequest className="h-3 w-3" />
-              <span>{task.githubPrState ?? "linked"}</span>
-              <ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </a>
-          ) : (
-            <span className="text-muted-foreground">No PR</span>
-          )}
-        </Section>
-      </Panel>
+  const decisionPanel = (
+    <ReviewDecisionPanel
+      task={task}
+      actions={actions}
+      pending={pending}
+      onAction={onAction}
+    />
+  );
+
+  const pullRequestPanel = (
+    <PullRequestPanel task={task} actions={actions} pending={pending} onAction={onAction} />
+  );
+
+  return (
+    <div className="space-y-5">
+      {reviewFocused ? (
+        <>
+          {handoffPanel}
+          {decisionPanel}
+          {pullRequestPanel}
+          {runPanel}
+        </>
+      ) : (
+        <>
+          {runPanel}
+          {handoffPanel}
+          {decisionPanel}
+          {pullRequestPanel}
+        </>
+      )}
     </div>
   );
+}
+
+function ReviewDecisionPanel({
+  task,
+  actions,
+  pending,
+  onAction,
+}: {
+  task: ServiceTask;
+  actions: TaskAction[];
+  pending: string | null;
+  onAction: (action: TaskAction) => void;
+}) {
+  const state = reviewGateState(task);
+  const decisionActions = actions.filter((action) =>
+    action.kind === "event" && action.event === "approve"
+      ? true
+      : action.kind === "request_changes" || action.kind === "open_pull_request",
+  );
+  const requestChangesBlocked = task.githubPrState === "open";
+
+  return (
+    <Panel title="Review Decision">
+      <Section title="State">
+        <span
+          className={cn(
+            "inline-flex rounded-md border px-2 py-0.5",
+            reviewGateTone(state) === "ready"
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              : reviewGateTone(state) === "warning"
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                : "text-muted-foreground",
+          )}
+        >
+          {reviewGateLabel(task)}
+        </span>
+      </Section>
+      {decisionActions.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {decisionActions.map((action) => (
+            <TaskActionControl
+              key={action.kind === "event" ? action.event : action.kind}
+              action={action}
+              pending={pending}
+              onAction={onAction}
+            />
+          ))}
+        </div>
+      )}
+      {requestChangesBlocked && (
+        <p className="text-muted-foreground">
+          This task already has an open pull request. Request changes on the PR, or close the PR
+          before continuing in Symphonia.
+        </p>
+      )}
+    </Panel>
+  );
+}
+
+function PullRequestPanel({
+  task,
+  actions,
+  pending,
+  onAction,
+}: {
+  task: ServiceTask;
+  actions: TaskAction[];
+  pending: string | null;
+  onAction: (action: TaskAction) => void;
+}) {
+  const prActions = actions.filter((action) =>
+    action.kind === "view_pr" || action.kind === "refresh_pr" || action.kind === "open_pull_request",
+  );
+
+  return (
+    <Panel title="Pull Request">
+      <Section title="State">
+        <span className="text-muted-foreground">{prStateLabel(task) ?? "No PR"}</span>
+      </Section>
+      {task.githubPr && (
+        <Section title="Link">
+          <a
+            href={task.githubPr}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted"
+          >
+            <GitPullRequest className="h-3 w-3" />
+            <span>{prStateLabel(task) ?? "linked"}</span>
+            <ExternalLink className="h-3 w-3 text-muted-foreground" />
+          </a>
+        </Section>
+      )}
+      {task.githubIssue && (
+        <Section title="GitHub issue">
+          <a
+            href={task.githubIssue}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted"
+          >
+            <Github className="h-3 w-3" />
+            <span>{task.githubIssueState ?? "linked"}</span>
+            <ExternalLink className="h-3 w-3 text-muted-foreground" />
+          </a>
+        </Section>
+      )}
+      {task.githubPrState === "merged" && (
+        <Section title="Merge status">
+          <span className="text-muted-foreground">Pull request was merged. Task completed.</span>
+        </Section>
+      )}
+      {task.githubPrState === "closed" && (
+        <Section title="Merge status">
+          <span className="text-muted-foreground">
+            Pull request was closed without merge. Task remains in review.
+          </span>
+        </Section>
+      )}
+      {prActions.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {prActions.map((action) => (
+            <TaskActionControl
+              key={action.kind === "view_pr" ? action.href : action.kind}
+              action={action}
+              pending={pending}
+              onAction={onAction}
+            />
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function TaskActionControl({
+  action,
+  pending,
+  onAction,
+}: {
+  action: TaskAction;
+  pending: string | null;
+  onAction: (action: TaskAction) => void;
+}) {
+  if (action.kind === "view_pr") {
+    return (
+      <a
+        href={action.href}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted"
+      >
+        {action.icon}
+        {action.label}
+      </a>
+    );
+  }
+
+  const pendingKey = action.kind === "event" ? action.event : action.kind;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onAction(action)}
+      disabled={pending != null}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50",
+        action.primary && "bg-primary text-primary-foreground hover:opacity-90",
+      )}
+    >
+      {action.icon}
+      {pending === pendingKey ? "Working..." : action.label}
+    </button>
+  );
+}
+
+function OpenPullRequestConfirmation({
+  task,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  task: ServiceTask;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const handoff = reviewHandoffForTask(task);
+  const details = openPullRequestDetails(task, handoff);
+
+  return (
+    <div className="mt-4 rounded-md border border-sky-500/30 bg-sky-500/10 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium">Open Pull Request</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            This will publish the review branch to GitHub and create a pull request.
+            No automatic merge will happen. Symphonia will not merge it automatically.
+          </p>
+        </div>
+        <GitPullRequest className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+      </div>
+      <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+        <ReviewDetail label="Base branch" value={details.baseBranch} />
+        <ReviewDetail label="Head branch" value={details.headBranch} />
+        <ReviewDetail label="Changed files" value={String(details.changedFilesCount)} />
+        <ReviewDetail label="Curated summary" value={details.curatedSummaryPath} />
+        <ReviewDetail label="Linked issue" value={details.linkedIssue} />
+      </dl>
+      <div className="mt-3 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={pending}
+          className="rounded-md border bg-background px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={pending}
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <GitPullRequest className="h-3.5 w-3.5" />
+          {pending ? "Opening..." : "Open Pull Request"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReviewDetail({ label, value }: { label: string; value?: string }) {
+  return (
+    <div>
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="mt-0.5 break-words font-mono text-[11px] text-foreground">
+        {value ?? "Not recorded"}
+      </dd>
+    </div>
+  );
+}
+
+function openPullRequestDetails(task: ServiceTask, handoff: ReturnType<typeof reviewHandoffForTask>) {
+  const baseBranch =
+    safeReviewBranch(task.handoff?.baseBranch) ??
+    safeReviewBranch(task.github?.pull_request?.base_branch) ??
+    safeReviewBranch(task.github?.repo?.default_branch) ??
+    "main";
+  const headBranch =
+    safeReviewBranch(task.handoff?.headBranch ?? task.run?.reviewBranch) ?? "Not recorded";
+  const linkedIssue = task.github?.issue?.number
+    ? `#${task.github.issue.number}`
+    : task.githubIssue ?? "Not linked";
+
+  return {
+    baseBranch,
+    headBranch,
+    changedFilesCount: handoff.files.length,
+    curatedSummaryPath: handoff.curatedSummaryPath ?? "Not recorded",
+    linkedIssue,
+  };
 }
 
 function validationStatusLabel(status: string): string {
@@ -1177,7 +1567,38 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
           },
         ];
       }
-      if (task.reviewApproved) {
+
+      if (task.githubPrState === "closed") {
+        return [
+          ...(task.githubPr
+            ? [
+                {
+                  label: "View Pull Request",
+                  kind: "view_pr" as const,
+                  href: task.githubPr,
+                  icon: <ExternalLink className="h-3.5 w-3.5" />,
+                },
+              ]
+            : []),
+          {
+            label: "Refresh PR Status",
+            kind: "refresh_pr",
+            icon: <GitPullRequest className="h-3.5 w-3.5" />,
+          },
+          ...(canRequestChanges(task)
+            ? [
+                {
+                  label: "Request changes",
+                  kind: "request_changes" as const,
+                  icon: <RotateCcw className="h-3.5 w-3.5" />,
+                  primary: true,
+                },
+              ]
+            : []),
+        ];
+      }
+
+      if (canOpenPullRequest(task)) {
         return [
           {
             label: "Open Pull Request",
@@ -1185,8 +1606,20 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
             icon: <GitPullRequest className="h-3.5 w-3.5" />,
             primary: true,
           },
+          ...(canRequestChanges(task)
+            ? [
+                {
+                  label: "Request changes",
+                  kind: "request_changes" as const,
+                  icon: <RotateCcw className="h-3.5 w-3.5" />,
+                },
+              ]
+            : []),
         ];
       }
+
+      if (!canRequestChanges(task)) return [];
+
       return [
         {
           label: "Approve",

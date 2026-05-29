@@ -109,6 +109,12 @@ export interface ValidationEvidence {
   detail: string;
 }
 
+export interface PullRequestRefreshResult {
+  state: "open" | "merged" | "closed" | "unknown";
+  message: string;
+  refreshedAt: string;
+}
+
 export interface TaskEligibilityCheck {
   ok: boolean;
   code: string;
