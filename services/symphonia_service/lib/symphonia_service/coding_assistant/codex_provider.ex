@@ -9,6 +9,7 @@ defmodule SymphoniaService.CodingAssistant.CodexProvider do
     BranchManager,
     ChangeDetector,
     ContextPack,
+    FailureClass,
     HandoffBuilder,
     RunStore
   }
@@ -17,6 +18,43 @@ defmodule SymphoniaService.CodingAssistant.CodexProvider do
 
   @impl true
   def id, do: "codex"
+
+  @impl true
+  def label, do: "Legacy Codex"
+
+  @impl true
+  def capabilities do
+    %{
+      "context_pack" => true,
+      "persistent_workspace" => false,
+      "streamed_public_steps" => false,
+      "change_detection" => true,
+      "validation_pipeline" => false,
+      "curated_summary" => false,
+      "review_branch" => true,
+      "handoff" => true,
+      "retry_classification" => true
+    }
+  end
+
+  @impl true
+  def readiness(_opts \\ []) do
+    case codex_executable() do
+      {:ok, _bin} ->
+        %{
+          "configured" => true,
+          "ready" => false,
+          "reason" => "Legacy provider does not satisfy Harness V2 review-first contract."
+        }
+
+      {:error, reason} ->
+        %{
+          "configured" => false,
+          "ready" => false,
+          "reason" => reason
+        }
+    end
+  end
 
   @impl true
   def preflight(repository, task, _params) do
@@ -61,6 +99,9 @@ defmodule SymphoniaService.CodingAssistant.CodexProvider do
   rescue
     error -> {:error, Exception.message(error)}
   end
+
+  @impl true
+  def classify_failure(reason, context), do: FailureClass.classify(reason, context)
 
   defp branch_preflight(repository, task) do
     BranchManager.ensure_repo_ready_for_task_branch!(repository, task)

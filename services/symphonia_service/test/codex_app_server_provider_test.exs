@@ -26,6 +26,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
         "symphonia-codex-app-server-provider-#{System.unique_integer([:positive])}"
       )
 
+    File.rm_rf!(root)
     File.mkdir_p!(root)
     private_key_path = Path.join(root, "github-app.pem")
     write_private_key!(private_key_path)
@@ -283,6 +284,26 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     assert [%{"code" => "max_concurrent_runs_reached"} | _rest] = result["decisions"]
   end
 
+  test "Harness run ignores requested provider and uses Codex App Server", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    [task | _rest] = TaskStore.list_tasks(repository)
+
+    result =
+      CodingAssistant.start_harness_run(registry_path, repository, task["key"], %{
+        "provider" => "claude_code",
+        "eligibility_reason" => "Provider lock invariant."
+      })
+
+    run = wait_for_run(runs_root, result["run"]["id"], "completed")
+
+    assert result["run"]["provider"] == "codex_app_server"
+    assert run["provider"] == "codex_app_server"
+    assert run["handoff"]["head_branch"] == "symphonia/task/sym-1"
+  end
+
   test "harness pause persists and blocks manual tick", %{
     registry_path: registry_path
   } do
@@ -301,7 +322,9 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     GenServer.stop(pid)
 
     restarted_name = :"harness_daemon_pause_restart_test_#{System.unique_integer([:positive])}"
-    {:ok, _pid} = Daemon.start_link(registry_path: registry_path, timer?: false, name: restarted_name)
+
+    {:ok, _pid} =
+      Daemon.start_link(registry_path: registry_path, timer?: false, name: restarted_name)
 
     assert Daemon.status(restarted_name)["paused"] == true
     assert Daemon.resume(restarted_name)["paused"] == false
@@ -405,7 +428,10 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
 
     failed_run =
       failed_run
-      |> Map.put("retry_at", DateTime.utc_now() |> DateTime.add(-30, :second) |> DateTime.to_iso8601())
+      |> Map.put(
+        "retry_at",
+        DateTime.utc_now() |> DateTime.add(-30, :second) |> DateTime.to_iso8601()
+      )
       |> tap(&rewrite_run!(runs_root, &1))
 
     Daemon.pause(name)

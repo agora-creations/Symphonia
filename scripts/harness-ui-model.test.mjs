@@ -33,6 +33,20 @@ const readinessCompiled = ts.transpileModule(readinessSource, {
 const readinessCompiledPath = join(tempDir, "readiness-ui-model.cjs");
 await writeFile(readinessCompiledPath, readinessCompiled.outputText);
 
+const providerSource = await readFile(
+  new URL("../lib/provider-ui-model.ts", import.meta.url),
+  "utf8",
+);
+const providerCompiled = ts.transpileModule(providerSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+    importsNotUsedAsValues: ts.ImportsNotUsedAsValues.Remove,
+  },
+});
+const providerCompiledPath = join(tempDir, "provider-ui-model.cjs");
+await writeFile(providerCompiledPath, providerCompiled.outputText);
+
 const require = createRequire(import.meta.url);
 const {
   activeRunPollingTarget,
@@ -72,6 +86,13 @@ const {
   readinessSummary,
   readinessTone,
 } = require(readinessCompiledPath);
+
+const {
+  canHarnessRunProvider,
+  providerMissingCapabilityLabels,
+  providerStatusLabel,
+  providerStatusTone,
+} = require(providerCompiledPath);
 
 function task(attrs = {}) {
   return {
@@ -572,9 +593,13 @@ test("task board uses shared review gate helpers without opening SSE streams", a
   assert.match(settingsView, /Recent decisions/);
   assert.match(settingsView, /groupHarnessDecisions/);
   assert.match(settingsView, /RepositoryReadinessDetails/);
+  assert.match(settingsView, /Coding Assistant Providers/);
+  assert.match(settingsView, /ProviderContractRow/);
+  assert.match(settingsView, /Not runnable by Harness/);
   assert.match(readinessView, /Repository readiness/);
   assert.match(readinessView, /Scanner advisory/);
   assert.doesNotMatch(readinessView, /workspacePath|codexThreadId|turnId|threadId|raw_log|provider_output/);
+  assert.doesNotMatch(settingsView, /workspacePath|codexThreadId|turnId|threadId|raw_log|provider_output|transcript/);
 });
 
 test("repository readiness helpers prioritize blockers and group checks", () => {
@@ -622,4 +647,43 @@ test("repository readiness helpers prioritize blockers and group checks", () => 
   };
 
   assert.equal(readinessPrimaryAction(githubBeforeValidation).id, "connect_github");
+});
+
+test("provider helpers label runnable and future providers", () => {
+  const codex = {
+    id: "codex_app_server",
+    label: "Codex App Server",
+    configured: true,
+    ready: true,
+    runnable: true,
+    runnableByHarness: true,
+    status: "ready",
+    reason: "Ready for local Codex runs.",
+    capabilities: { context_pack: true, validation_pipeline: true, handoff: true },
+    missingCapabilities: [],
+  };
+
+  const claude = {
+    id: "claude_code",
+    label: "Claude Code",
+    configured: false,
+    ready: false,
+    runnable: false,
+    runnableByHarness: false,
+    status: "experimental",
+    reason: "Coming later. Not runnable by Harness V2.",
+    capabilities: { validation_pipeline: false, review_branch: false, handoff: false },
+    missingCapabilities: ["handoff", "review_branch", "validation_pipeline"],
+  };
+
+  assert.equal(canHarnessRunProvider(codex), true);
+  assert.equal(providerStatusLabel(codex), "Ready");
+  assert.equal(providerStatusTone(codex), "ready");
+  assert.equal(canHarnessRunProvider(claude), false);
+  assert.equal(providerStatusLabel(claude), "Coming later");
+  assert.deepEqual(providerMissingCapabilityLabels(claude), [
+    "handoff",
+    "review branch",
+    "validation",
+  ]);
 });

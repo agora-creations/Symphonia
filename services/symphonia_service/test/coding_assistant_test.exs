@@ -41,6 +41,24 @@ defmodule SymphoniaService.CodingAssistantTest do
     @behaviour SymphoniaService.CodingAssistant.Provider
 
     def id, do: "slow_demo"
+    def label, do: "Slow Demo"
+
+    def capabilities do
+      %{
+        "context_pack" => false,
+        "persistent_workspace" => false,
+        "streamed_public_steps" => false,
+        "change_detection" => false,
+        "validation_pipeline" => false,
+        "curated_summary" => false,
+        "review_branch" => false,
+        "handoff" => false,
+        "retry_classification" => true
+      }
+    end
+
+    def readiness(_opts), do: %{"configured" => true, "ready" => false}
+    def preflight(_repository, _task, _params), do: :ok
 
     def run(_repository, _task, run, _params) do
       if pid = Application.get_env(:symphonia_service, :slow_provider_test_pid) do
@@ -50,6 +68,8 @@ defmodule SymphoniaService.CodingAssistantTest do
       Process.sleep(:infinity)
       {:error, "The Coding Assistant should have been canceled."}
     end
+
+    def classify_failure(_reason, _context), do: "unknown"
   end
 
   setup do

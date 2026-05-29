@@ -5,10 +5,40 @@ defmodule SymphoniaService.CodingAssistant.LocalDemoProvider do
 
   @behaviour SymphoniaService.CodingAssistant.Provider
 
-  alias SymphoniaService.CodingAssistant.{BranchManager, HandoffBuilder, RunStore}
+  alias SymphoniaService.CodingAssistant.{BranchManager, FailureClass, HandoffBuilder, RunStore}
 
   @impl true
   def id, do: "local_demo"
+
+  @impl true
+  def label, do: "Local Demo"
+
+  @impl true
+  def capabilities do
+    %{
+      "context_pack" => false,
+      "persistent_workspace" => false,
+      "streamed_public_steps" => false,
+      "change_detection" => false,
+      "validation_pipeline" => false,
+      "curated_summary" => false,
+      "review_branch" => true,
+      "handoff" => true,
+      "retry_classification" => true
+    }
+  end
+
+  @impl true
+  def readiness(_opts \\ []) do
+    %{
+      "configured" => true,
+      "ready" => false,
+      "reason" => "Local demo provider is not runnable by Harness V2."
+    }
+  end
+
+  @impl true
+  def preflight(_repository, _task, _params), do: :ok
 
   @impl true
   def run(repository, task, run, params) do
@@ -24,6 +54,9 @@ defmodule SymphoniaService.CodingAssistant.LocalDemoProvider do
   rescue
     error -> {:error, Exception.message(error)}
   end
+
+  @impl true
+  def classify_failure(reason, context), do: FailureClass.classify(reason, context)
 
   defp force_failure?(params) do
     Map.get(params, "forceFailure") == true or Map.get(params, "force_failure") == true

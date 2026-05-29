@@ -285,11 +285,12 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
     status = ProviderCatalog.readiness_status(mode: :check_only)
     providers = Map.new(status["providers"] || [], &{&1["id"], &1})
     codex = providers["codex_app_server"] || %{}
+    codex_contract? = codex["runnableByHarness"] == true and codex["missingCapabilities"] == []
 
     non_codex_disabled? =
       providers
       |> Enum.reject(fn {id, _provider} -> id == "codex_app_server" end)
-      |> Enum.all?(fn {_id, provider} -> provider["runnable"] == false end)
+      |> Enum.all?(fn {_id, provider} -> provider["runnableByHarness"] == false end)
 
     [
       check(
@@ -333,13 +334,24 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
         "Codex daemon reachability is not checked unless it can be observed without starting Codex."
       ),
       check(
+        "codex_provider_contract",
+        "Codex provider contract",
+        if(codex_contract?, do: "passed", else: "failed"),
+        "provider",
+        if(codex_contract?,
+          do: "Codex App Server satisfies the Harness provider contract.",
+          else: "Codex App Server is missing required Harness provider capabilities."
+        ),
+        if(codex_contract?, do: nil, else: action("setup_codex"))
+      ),
+      check(
         "harness_provider_contract",
         "Harness provider contract",
         if(non_codex_disabled?, do: "passed", else: "failed"),
         "provider",
         if(non_codex_disabled?,
-          do: "Only Codex App Server is runnable by Harness V1.",
-          else: "Non-Codex providers must remain disabled for Harness V1."
+          do: "Only Codex App Server is runnable by Harness V2.",
+          else: "Non-Codex providers must remain disabled for Harness V2."
         )
       )
     ]

@@ -30,6 +30,7 @@ async function loadTs(path, outName) {
 test("repo opening lands on the Clarise repo home, not tasks or workspace", async () => {
   const repoPage = await source("app/r/[repoKey]/page.tsx");
   const dashboard = await source("app/dashboard/page.tsx");
+  const appSidebar = await source("components/app-sidebar.tsx");
   const sidebar = await source("components/sidebar/sidebar-body.tsx");
   const docTree = await source("components/sidebar/doc-tree.tsx");
   const palette = await source("components/command-palette.tsx");
@@ -52,9 +53,17 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
   assert.doesNotMatch(sidebar, /Open document tree/);
   assert.doesNotMatch(sidebar, /Close document tree/);
   assert.doesNotMatch(sidebar, /symphonia\.doctreeOpen/);
-  assert.match(sidebar, /<WorkspaceCreateMenu pending=\{workspacePagePending\} onCreate=\{createWorkspacePage\} \/>/);
-  assert.match(sidebar, /aria-label="Create workspace page"/);
-  assert.match(sidebar, /<Plus className="h-3\.5 w-3\.5" \/>/);
+  assert.doesNotMatch(sidebar, /WorkspaceCreateMenu/);
+  assert.doesNotMatch(sidebar, /aria-label="Create workspace page"/);
+  assert.doesNotMatch(sidebar, /title="Create workspace page"/);
+  assert.match(sidebar, /aria-label="New workspace document"/);
+  assert.match(sidebar, /WORKSPACE_DOCUMENT_CREATE_TYPES/);
+  assert.doesNotMatch(sidebar, /label="Settings"/);
+  assert.match(appSidebar, /<SidebarFooter repoKey=\{repoKey\} \/>/);
+  assert.match(appSidebar, /aria-label="Settings"/);
+  assert.match(appSidebar, /settingsHref = `\/r\/\$\{repoKey\.toLowerCase\(\)\}\/settings`/);
+  assert.doesNotMatch(docTree, /SpecCreateMenu/);
+  assert.doesNotMatch(docTree, /SPEC_TYPE_LABELS/);
   assert.doesNotMatch(docTree, /aria-label="Pages menu"/);
   assert.doesNotMatch(docTree, /aria-label="New page"/);
   assert.doesNotMatch(docTree, /aria-label="Open trash"/);

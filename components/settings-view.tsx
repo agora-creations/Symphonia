@@ -7,7 +7,11 @@ import {
   type ExternalIssue,
   type ImportSource,
 } from "@/data/mock";
-import type { GitHubConnectionState, RepositoryAutomationState } from "@/lib/repository-model";
+import type {
+  CodingAssistantProviderStatus,
+  GitHubConnectionState,
+  RepositoryAutomationState,
+} from "@/lib/repository-model";
 import {
   RepositoryReadinessCompact,
   RepositoryReadinessDetails,
@@ -17,6 +21,13 @@ import {
   harnessStatusLabel,
   type HarnessDecision,
 } from "@/lib/harness-ui-model";
+import {
+  canHarnessRunProvider,
+  providerMissingCapabilityLabels,
+  providerStatusLabel,
+  providerStatusTone,
+  providerSupportedCapabilityLabels,
+} from "@/lib/provider-ui-model";
 import {
   User as UserIcon,
   Bell,
@@ -37,6 +48,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  ShieldCheck,
 } from "lucide-react";
 
 type SectionId =
@@ -390,15 +402,6 @@ async function setAutomationEnabled(
   return payload.automation;
 }
 
-interface HarnessProviderStatus {
-  id: string;
-  label: string;
-  configured: boolean;
-  ready: boolean;
-  runnable: boolean;
-  reason?: string;
-}
-
 interface HarnessStatus {
   running: boolean;
   online?: boolean;
@@ -415,7 +418,7 @@ interface HarnessStatus {
   };
   providerReadiness?: {
     runnableProvider?: string;
-    providers?: HarnessProviderStatus[];
+    providers?: CodingAssistantProviderStatus[];
   };
   lastHeartbeatAt?: string;
   lastDispatch?: {
@@ -566,6 +569,7 @@ function HarnessPanel() {
 
   const providers = status?.providerReadiness?.providers ?? [];
   const runnableProvider = providers.find((provider) => provider.id === "codex_app_server");
+  const canRunCodex = runnableProvider ? canHarnessRunProvider(runnableProvider) : false;
   const decisionGroups = groupHarnessDecisions(status?.recentDecisions ?? []);
   const statusLabel = harnessStatusLabel(error ? { lastError: { message: error } } : status);
   const statusTone = error ? "warning" : status?.paused ? "neutral" : status?.online && status.running ? "ready" : "neutral";
@@ -673,24 +677,16 @@ function HarnessPanel() {
       <div className="border-t px-3 py-3">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="text-[11px] font-medium uppercase text-muted-foreground">
-            Provider readiness
+            Coding Assistant Providers
           </div>
           <StatusPill
-            tone={runnableProvider?.ready ? "ready" : "warning"}
-            label={runnableProvider?.ready ? "Codex ready" : "Codex blocked"}
+            tone={canRunCodex ? "ready" : "warning"}
+            label={canRunCodex ? "Codex ready" : "Codex setup"}
           />
         </div>
         <div className="space-y-2">
           {providers.map((provider) => (
-            <div key={provider.id} className="flex items-center justify-between gap-3 text-xs">
-              <div className="min-w-0">
-                <div className="font-medium">{provider.label}</div>
-                <div className="truncate text-muted-foreground">{provider.reason}</div>
-              </div>
-              <span className="shrink-0 text-muted-foreground">
-                {provider.runnable ? (provider.ready ? "Ready" : "Needs setup") : "Disabled"}
-              </span>
-            </div>
+            <ProviderContractRow key={provider.id} provider={provider} />
           ))}
         </div>
       </div>
@@ -732,6 +728,52 @@ function HarnessPanel() {
           <div className="text-xs text-muted-foreground">No Harness decisions yet.</div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ProviderContractRow({ provider }: { provider: CodingAssistantProviderStatus }) {
+  const missing = providerMissingCapabilityLabels(provider);
+  const supported = providerSupportedCapabilityLabels(provider);
+  const visibleSupported = supported.slice(0, 4);
+  const visibleMissing = missing.slice(0, 4);
+
+  return (
+    <div className="rounded-[8px] border bg-background/60 p-2.5 text-xs">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 font-medium">
+            <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>{provider.label}</span>
+          </div>
+          <div className="mt-1 text-muted-foreground">{provider.reason}</div>
+        </div>
+        <StatusPill tone={providerStatusTone(provider)} label={providerStatusLabel(provider)} />
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {canHarnessRunProvider(provider) ? (
+          <span className="rounded-[7px] border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-600 dark:text-emerald-400">
+            Runnable by Harness
+          </span>
+        ) : (
+          <span className="rounded-[7px] border px-2 py-0.5 text-muted-foreground">
+            Not runnable by Harness
+          </span>
+        )}
+        {visibleSupported.map((capability) => (
+          <span key={capability} className="rounded-[7px] border px-2 py-0.5 text-muted-foreground">
+            {capability}
+          </span>
+        ))}
+      </div>
+
+      {visibleMissing.length > 0 && (
+        <div className="mt-2 text-muted-foreground">
+          Missing: {visibleMissing.join(", ")}
+          {missing.length > visibleMissing.length ? ` +${missing.length - visibleMissing.length}` : ""}
+        </div>
+      )}
     </div>
   );
 }

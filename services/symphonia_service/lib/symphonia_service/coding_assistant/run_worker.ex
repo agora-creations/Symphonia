@@ -7,6 +7,7 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
 
   alias SymphoniaService.CodingAssistant.{
     AppServerClient,
+    FailureClass,
     HandoffBuilder,
     RunEvents,
     RunRegistry,
@@ -113,7 +114,7 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
 
   defp handle_provider_error(%{"kind" => "daemon_assignment"} = state, run, reason) do
     public_message = failure_explanation_for_state(state, reason)
-    failed_run = RunStore.mark_failed(run, reason, public_message)
+    failed_run = mark_provider_failed(state, run, reason, public_message)
 
     case RetryPolicy.schedule(failed_run, reason, public_message) do
       {:retry, attrs} ->
@@ -137,7 +138,7 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
     attempt = state["attempt"]
     max_attempts = state["max_attempts"]
     public_message = failure_explanation_for_state(state, reason)
-    failed_run = RunStore.mark_failed(run, reason, public_message)
+    failed_run = mark_provider_failed(state, run, reason, public_message)
 
     cond do
       AppServerClient.setup_blocker?(public_message) ->
@@ -180,16 +181,39 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
 
   defp handle_provider_error(state, run, reason) do
     public_message = failure_explanation_for_state(state, reason)
-    failed_run = RunStore.mark_failed(run, reason, public_message)
+    failed_run = mark_provider_failed(state, run, reason, public_message)
     task = fail_task(state, failed_run, public_message)
     {:done, failed_run, task}
   end
 
   defp fail_run(state, run, reason) do
     public_message = failure_explanation_for_state(state, reason)
-    failed_run = RunStore.mark_failed(run, reason, public_message)
+    failed_run = mark_provider_failed(state, run, reason, public_message)
     fail_task(state, failed_run, public_message)
     failed_run
+  end
+
+  defp mark_provider_failed(state, run, reason, public_message) do
+    failure_class =
+      if provider = state["provider"] do
+        provider.classify_failure(reason, %{
+          "kind" => state["kind"],
+          "public_message" => public_message,
+          "run" => run
+        })
+        |> FailureClass.normalize()
+      else
+        "unknown"
+      end
+
+    run
+    |> RunStore.mark_failed(reason, public_message)
+    |> RunStore.update_metadata(%{"failure_class" => failure_class})
+  rescue
+    _error ->
+      run
+      |> RunStore.mark_failed(reason, public_message)
+      |> RunStore.update_metadata(%{"failure_class" => "unknown"})
   end
 
   defp fail_task(state, run, public_message) do

@@ -138,6 +138,32 @@ export interface RepositoryAutomationState {
   disabledAt?: string;
 }
 
+export type CodingAssistantProviderStatusValue =
+  | "ready"
+  | "not_configured"
+  | "blocked"
+  | "disabled"
+  | "experimental";
+
+export interface CodingAssistantProviderStatus {
+  id: string;
+  label: string;
+  configured: boolean;
+  ready: boolean;
+  runnable: boolean;
+  runnableByHarness: boolean;
+  status: CodingAssistantProviderStatusValue;
+  reason: string;
+  capabilities: Record<string, boolean>;
+  missingCapabilities: string[];
+}
+
+export interface CodingAssistantProviderCatalog {
+  defaultProvider?: string;
+  runnableProvider: string;
+  providers: CodingAssistantProviderStatus[];
+}
+
 export interface GitHubConnectionState {
   connected: boolean;
   authMode?: "app_installation" | "device_user_token";

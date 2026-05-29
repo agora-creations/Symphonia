@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Menu, X } from "lucide-react";
+import { Menu, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SidebarBody } from "@/components/sidebar/sidebar-body";
 import type { RepositorySummary } from "@/lib/repository-model";
@@ -129,7 +129,7 @@ export function AppSidebar({ repoKey }: Props) {
             <div className="flex-1 overflow-hidden">
               <SidebarBody repoKey={repoKey} onNavigate={() => setMobileOpen(false)} />
             </div>
-            <SidebarFooter />
+            <SidebarFooter repoKey={repoKey} />
           </aside>
         </div>
       )}
@@ -139,26 +139,41 @@ export function AppSidebar({ repoKey }: Props) {
         <div className="flex flex-1 flex-col overflow-hidden">
           <SidebarBody repoKey={repoKey} />
         </div>
-        <SidebarFooter />
+        <SidebarFooter repoKey={repoKey} />
       </aside>
     </>
   );
 }
 
-function SidebarFooter() {
+function SidebarFooter({ repoKey }: { repoKey: string }) {
+  const pathname = usePathname();
+  const settingsHref = `/r/${repoKey.toLowerCase()}/settings`;
+  const settingsActive = pathname === settingsHref;
+
   return (
     <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
       <button
         type="button"
         disabled
         title="Coming soon"
-        className="flex items-center gap-2 rounded-md px-1.5 py-1 opacity-60"
+        className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 opacity-60"
       >
         <span className="grid h-6 w-6 place-items-center rounded-full bg-rose-500 text-[10px] font-medium text-white">
           AM
         </span>
-        <span className="text-sm">Ava Martinez</span>
+        <span className="truncate text-sm">Ava Martinez</span>
       </button>
+      <Link
+        href={settingsHref}
+        aria-label="Settings"
+        title="Settings"
+        className={cn(
+          "grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground",
+          settingsActive && "bg-sidebar-accent text-sidebar-accent-foreground",
+        )}
+      >
+        <Settings className="h-3.5 w-3.5" />
+      </Link>
     </div>
   );
 }

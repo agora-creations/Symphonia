@@ -10,6 +10,7 @@ defmodule SymphoniaService.CodingAssistant do
     AppServerProvider,
     CodexProvider,
     LocalDemoProvider,
+    ProviderCatalog,
     RunEvents,
     RunStore,
     RunSupervisor
@@ -55,7 +56,7 @@ defmodule SymphoniaService.CodingAssistant do
     task = get_task!(repository, task_key)
     ensure_assignable!(task)
 
-    provider = AppServerProvider
+    provider = ProviderCatalog.harness_runnable_provider()
 
     run =
       RunStore.create(%{

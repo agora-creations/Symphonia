@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   FileText,
@@ -12,7 +12,6 @@ import {
   MessageCircle,
   Plus,
   Search,
-  Settings,
   Sparkles,
   Users,
   ArrowLeft,
@@ -21,15 +20,41 @@ import { cn } from "@/lib/utils";
 import { DocTree } from "@/components/sidebar/doc-tree";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCommandPalette } from "@/components/command-palette";
-import { useDocs } from "@/lib/docs-store";
 import { useNewTask } from "@/components/new-task-dialog";
-import type { RepositorySummary } from "@/lib/repository-model";
+import type {
+  RepositorySummary,
+  SpecArtifact,
+  SpecArtifactType,
+} from "@/lib/repository-model";
 
 interface Props {
   repoKey: string;
   /** Called after navigating to a destination — used to close the mobile drawer. */
   onNavigate?: () => void;
 }
+
+const WORKSPACE_DOCUMENT_CREATE_TYPES: SpecArtifactType[] = [
+  "milestone",
+  "discussion",
+  "requirements",
+  "task_proposal",
+  "task_brief",
+  "plan",
+  "decision",
+];
+
+const WORKSPACE_DOCUMENT_LABELS: Record<SpecArtifactType, string> = {
+  codebase_map: "Codebase map",
+  codebase_conventions: "Conventions",
+  codebase_architecture: "Architecture",
+  milestone: "Milestone",
+  discussion: "Discussion",
+  requirements: "Requirement",
+  plan: "Plan",
+  task_proposal: "Task proposal",
+  task_brief: "Task brief",
+  decision: "Decision",
+};
 
 /**
  * Inner sidebar navigation, shared by the desktop sidebar and the mobile drawer.
@@ -42,9 +67,10 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
   const repoSlug = repoKey.toLowerCase();
   const base = `/r/${repoSlug}`;
   const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
-  const [workspacePagePending, setWorkspacePagePending] = useState(false);
+  const [workspaceDocsInitialized, setWorkspaceDocsInitialized] = useState(false);
+  const [workspaceDocPending, setWorkspaceDocPending] = useState<SpecArtifactType | null>(null);
+  const [workspaceDocError, setWorkspaceDocError] = useState<string | null>(null);
   const palette = useCommandPalette();
-  const { createPage } = useDocs();
   const newTask = useNewTask();
   const repo = useMemo(
     () => repositories.find((r) => r.key.toLowerCase() === repoSlug),
@@ -68,20 +94,70 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
     };
   }, []);
 
+  const loadWorkspaceDocumentState = useCallback(async () => {
+    const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace`, {
+      cache: "no-store",
+    });
+    const payload = (await res.json()) as {
+      specWorkspace?: { state?: { initialized?: boolean } };
+    };
+    return Boolean(res.ok && payload.specWorkspace?.state?.initialized);
+  }, [repoKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadWorkspaceDocumentState()
+      .then((initialized) => {
+        if (!cancelled) setWorkspaceDocsInitialized(initialized);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceDocsInitialized(false);
+      });
+
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ repoKey: string }>).detail;
+      if (detail?.repoKey === repoKey) {
+        void loadWorkspaceDocumentState().then(setWorkspaceDocsInitialized).catch(() => {
+          setWorkspaceDocsInitialized(false);
+        });
+      }
+    };
+    window.addEventListener("symphonia:specWorkspaceChanged", handler as EventListener);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("symphonia:specWorkspaceChanged", handler as EventListener);
+    };
+  }, [loadWorkspaceDocumentState, repoKey]);
+
   const isActive = (to: string) => pathname === to || pathname.startsWith(to + "/");
   const handleNav = () => onNavigate?.();
 
-  const createWorkspacePage = async () => {
-    setWorkspacePagePending(true);
+  const createWorkspaceDocument = async (type: SpecArtifactType) => {
+    setWorkspaceDocPending(type);
+    setWorkspaceDocError(null);
     try {
-      const page = await createPage(repoKey, "doc", {
-        title: "Untitled",
-        body: "",
-      });
-      router.push(`/r/${repoSlug}/docs/${encodeURIComponent(page.id)}`);
+      const res = await fetch(
+        `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/artifacts/${encodeURIComponent(
+          type,
+        )}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "Untitled", body: "" }),
+        },
+      );
+      const payload = (await res.json()) as { artifact?: SpecArtifact; error?: string };
+      if (!res.ok || !payload.artifact) {
+        throw new Error(payload.error ?? "Could not create workspace document");
+      }
+      window.dispatchEvent(new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }));
+      router.push(specArtifactHref(repoSlug, payload.artifact));
       handleNav();
+    } catch (err) {
+      setWorkspaceDocError(err instanceof Error ? err.message : "Could not create workspace document");
     } finally {
-      setWorkspacePagePending(false);
+      setWorkspaceDocPending(null);
     }
   };
 
@@ -199,7 +275,13 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
             <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Workspace
             </span>
-            <WorkspaceCreateMenu pending={workspacePagePending} onCreate={createWorkspacePage} />
+            {workspaceDocsInitialized && (
+              <WorkspaceDocumentCreateMenu
+                pending={workspaceDocPending}
+                error={workspaceDocError}
+                onCreate={createWorkspaceDocument}
+              />
+            )}
           </div>
           <nav className="mb-1 space-y-0.5">
             <NavLink
@@ -237,17 +319,6 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
             />
           </nav>
         </div>
-
-        <nav className="space-y-0.5">
-          <NavLink
-            to={`${base}/settings`}
-            label="Settings"
-            icon={<Settings className="h-3.5 w-3.5" />}
-            active={isActive(`${base}/settings`)}
-            onNavigate={handleNav}
-            title="Repository, automation, and integration settings"
-          />
-        </nav>
 
         <div>
           <div className="mb-1 flex items-center justify-between px-2">
@@ -301,35 +372,45 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
   );
 }
 
-function WorkspaceCreateMenu({
+function WorkspaceDocumentCreateMenu({
   pending,
+  error,
   onCreate,
 }: {
-  pending: boolean;
-  onCreate: () => Promise<void>;
+  pending: SpecArtifactType | null;
+  error: string | null;
+  onCreate: (type: SpecArtifactType) => Promise<void>;
 }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label="Create workspace page"
-          title="Create workspace page"
-          className="grid h-6 w-6 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+          aria-label="New workspace document"
+          title="New workspace document"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-44 p-1">
-        <button
-          type="button"
-          onClick={() => void onCreate()}
-          disabled={pending}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <FileText className="h-3.5 w-3.5" />
-          New page
-        </button>
+      <PopoverContent align="end" className="w-52 p-1">
+        {WORKSPACE_DOCUMENT_CREATE_TYPES.map((type) => (
+          <button
+            key={type}
+            type="button"
+            onClick={() => void onCreate(type)}
+            disabled={pending === type}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            New {WORKSPACE_DOCUMENT_LABELS[type]}
+          </button>
+        ))}
+        {error && (
+          <p className="mt-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-300">
+            {error}
+          </p>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -337,6 +418,15 @@ function WorkspaceCreateMenu({
 
 function shortRepoName(name: string): string {
   return name.includes("/") ? name.split("/").at(-1) || name : name;
+}
+
+function specArtifactHref(
+  slug: string,
+  artifact: Pick<SpecArtifact, "type" | "id">,
+) {
+  return `/r/${slug}/workspace/${encodeURIComponent(artifact.type)}/${encodeURIComponent(
+    artifact.id,
+  )}`;
 }
 
 function colorForRepo(key: string): string {

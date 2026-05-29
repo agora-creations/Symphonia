@@ -13,6 +13,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
     ChangeDetector,
     ContextPack,
     CuratedSummary,
+    FailureClass,
     HandoffBuilder,
     RunEvents,
     RunStore
@@ -23,6 +24,38 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
 
   @impl true
   def id, do: "codex_app_server"
+
+  @impl true
+  def label, do: "Codex App Server"
+
+  @impl true
+  def capabilities do
+    %{
+      "context_pack" => true,
+      "persistent_workspace" => true,
+      "streamed_public_steps" => true,
+      "change_detection" => true,
+      "validation_pipeline" => true,
+      "curated_summary" => true,
+      "review_branch" => true,
+      "handoff" => true,
+      "retry_classification" => true
+    }
+  end
+
+  @impl true
+  def readiness(opts \\ []) do
+    readiness = AppServerClient.check_ready(opts)
+
+    %{
+      "configured" => readiness["configured"],
+      "ready" => readiness["ready"],
+      "schemaAvailable" => readiness["schemaAvailable"],
+      "binaryAvailable" => readiness["binaryAvailable"],
+      "daemonReachable" => readiness["daemonReachable"],
+      "reason" => readiness["reason"]
+    }
+  end
 
   @impl true
   def preflight(repository, task, params) do
@@ -96,6 +129,9 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
   rescue
     error -> {:error, Exception.message(error)}
   end
+
+  @impl true
+  def classify_failure(reason, context), do: FailureClass.classify(reason, context)
 
   defp branch_preflight(repository, task) do
     BranchManager.ensure_repo_ready_for_task_branch!(repository, task)

@@ -3,9 +3,8 @@ defmodule SymphoniaService.Harness.RetryPolicy do
   Conservative retry policy for Harness-owned daemon assignment runs.
   """
 
-  alias SymphoniaService.CodingAssistant.AppServerClient
+  alias SymphoniaService.CodingAssistant.FailureClass
 
-  @retryable_classes ~w(transient_provider transient_workspace)
   @max_attempts 2
   @backoff_seconds %{1 => 30, 2 => 120}
 
@@ -14,12 +13,12 @@ defmodule SymphoniaService.Harness.RetryPolicy do
   def schedule(run, reason, public_message \\ nil)
 
   def schedule(%{"kind" => "daemon_assignment"} = run, reason, public_message) do
-    failure_class = classify(reason, public_message)
+    failure_class = run["failure_class"] || classify(reason, public_message)
     current_attempt = integer(run["attempt"], 0)
     max_attempts = integer(run["max_attempts"], @max_attempts)
 
     cond do
-      failure_class not in @retryable_classes ->
+      not FailureClass.retryable?(failure_class) ->
         {:no_retry, %{"failure_class" => failure_class}}
 
       current_attempt >= max_attempts ->
@@ -48,43 +47,10 @@ defmodule SymphoniaService.Harness.RetryPolicy do
 
   def schedule(_run, _reason, _public_message), do: {:no_retry, %{"failure_class" => "unknown"}}
 
-  def classify(reason, public_message \\ nil) do
-    text =
-      [reason, public_message]
-      |> Enum.filter(&is_binary/1)
-      |> Enum.join(" ")
-      |> String.downcase()
+  def classify(reason, public_message \\ nil),
+    do: FailureClass.classify(reason, %{"public_message" => public_message})
 
-    cond do
-      Enum.any?([reason, public_message], &AppServerClient.setup_blocker?/1) ->
-        "setup_blocked"
-
-      text =~ "validation" and text =~ "failed" ->
-        "validation_failed"
-
-      text =~ "no reviewable" or text =~ "did not produce any files" or
-          text =~ "no committable" ->
-        "no_reviewable_files"
-
-      text =~ "waiting for user" or text =~ "needs input" ->
-        "user_blocked"
-
-      text =~ "workspace" and
-          (text =~ "temporar" or text =~ "lock" or text =~ "unavailable" or text =~ "missing") ->
-        "transient_workspace"
-
-      text =~ "codex app server did not respond" or text =~ "timed out" or
-          text =~ "timeout" or text =~ "econn" or text =~ "connection refused" or
-          text =~ "status interrupted" or text =~ "transient" or text =~ "temporar" or
-          text =~ "unavailable" ->
-        "transient_provider"
-
-      true ->
-        "unknown"
-    end
-  end
-
-  def retryable_class?(class), do: class in @retryable_classes
+  def retryable_class?(class), do: FailureClass.retryable?(class)
 
   def scheduled?(%{"retry_at" => retry_at} = run) when is_binary(retry_at) do
     retryable_class?(run["failure_class"]) and run["state"] == "failed"

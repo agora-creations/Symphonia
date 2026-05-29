@@ -15,6 +15,7 @@ defmodule SymphoniaService.HTTPServer do
   }
 
   alias SymphoniaService.Clarise.{ArtifactExtractor, MilestoneLoop, PlanToTaskCompiler}
+  alias SymphoniaService.CodingAssistant.ProviderCatalog
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
   alias SymphoniaService.Harness.{Automation, Daemon, Eligibility}
   alias SymphoniaService.Readiness.{RepositoryReadiness, RepositoryScanner, SetupActions}
@@ -88,6 +89,10 @@ defmodule SymphoniaService.HTTPServer do
 
   defp route(%{method: "GET", path: "/api/github/connection"}, _registry_path) do
     {200, %{"connection" => Auth.connection()}}
+  end
+
+  defp route(%{method: "GET", path: "/api/coding-assistants/providers"}, _registry_path) do
+    {200, ProviderCatalog.readiness_status(mode: :check_only)}
   end
 
   defp route(%{method: "GET", path: "/api/github/repositories"}, _registry_path) do
