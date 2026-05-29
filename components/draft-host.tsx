@@ -64,6 +64,7 @@ const CATEGORY_TITLE_HINT: Record<DocCategory, string> = {
 export function DraftHost({ children }: { children: ReactNode }) {
   const { newDraft, saveDraft, discardDraft } = useDocs();
   const [draft, setDraft] = useState<DocPage | null>(null);
+  const [saving, setSaving] = useState(false);
   const router = useRouter();
 
   const startDraft = useCallback<DraftHostCtx["startDraft"]>(
@@ -84,27 +85,34 @@ export function DraftHost({ children }: { children: ReactNode }) {
 
   const close = () => setDraft(null);
 
-  const onSave = () => {
+  const onSave = async (
+    patch?: Partial<Pick<DocPage, "title" | "body" | "icon" | "cover" | "published">>,
+  ) => {
     if (!draft) return;
-    const saved = saveDraft(draft.id);
-    setDraft(null);
-    if (saved) {
-      const slug = saved.repo.toLowerCase();
-      const sectionByCategory: Record<DocCategory, string> = {
-        task: "tasks",
-        project: "projects",
-        doc: "docs",
-        decision: "decisions",
-        review: "reviews",
-        "run-summary": "run-summaries",
-        workflow: "workflow",
-      };
-      const section = sectionByCategory[saved.category];
-      const href =
-        saved.category === "workflow"
-          ? `/r/${slug}/workflow`
-          : `/r/${slug}/${section}/${saved.id}`;
-      router.push(href);
+    setSaving(true);
+    try {
+      const saved = await saveDraft(draft.id, patch);
+      setDraft(null);
+      if (saved) {
+        const slug = saved.repo.toLowerCase();
+        const sectionByCategory: Record<DocCategory, string> = {
+          task: "tasks",
+          project: "projects",
+          doc: "docs",
+          decision: "decisions",
+          review: "reviews",
+          "run-summary": "run-summaries",
+          workflow: "workflow",
+        };
+        const section = sectionByCategory[saved.category];
+        const href =
+          saved.category === "workflow"
+            ? `/r/${slug}/workflow`
+            : `/r/${slug}/${section}/${saved.id}`;
+        router.push(href);
+      }
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -135,9 +143,10 @@ export function DraftHost({ children }: { children: ReactNode }) {
             </div>
             <button
               onClick={onDiscard}
+              disabled={saving}
               className="text-xs text-muted-foreground hover:text-foreground"
             >
-              Close without saving
+              {saving ? "Saving..." : "Close without saving"}
             </button>
           </div>
           <div className="flex-1 min-h-0">

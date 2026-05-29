@@ -28,7 +28,9 @@ const {
   canRequestChanges,
   daemonLabel,
   harnessLabel,
+  harnessStatusLabel,
   harnessStatusForTask,
+  groupHarnessDecisions,
   isReviewReady,
   prStateLabel,
   reviewHandoffForTask,
@@ -41,7 +43,12 @@ const {
   runTimelineForTask,
   safeReviewBranch,
   safeSummaryPath,
+  taskOperationalBadge,
   terminalRunStateLabel,
+  hasFailedRequiredValidation,
+  validationBadgeForTask,
+  validationSummaryLabel,
+  validationSummaryState,
 } = require(compiledPath);
 
 function task(attrs = {}) {
@@ -66,6 +73,26 @@ test("automation and daemon labels reflect enabled and disabled states", () => {
   assert.equal(harnessLabel({ enabled: false }), "Automation off");
   assert.equal(daemonLabel({ running: true }), "Background service: Active");
   assert.equal(daemonLabel({ running: false }), "Background service: Stopped");
+  assert.equal(harnessStatusLabel({ online: true, running: true }), "Running");
+  assert.equal(harnessStatusLabel({ online: true, running: true, paused: true }), "Paused");
+  assert.equal(harnessStatusLabel({ lastError: { message: "Nope" } }), "Error");
+  assert.equal(harnessStatusLabel(null), "Loading");
+
+  assert.deepEqual(
+    groupHarnessDecisions([
+      { kind: "dispatch", code: "dispatched" },
+      { kind: "retry", code: "retry_dispatched" },
+      { dispatched: false, code: "status_not_todo" },
+    ]),
+    {
+      dispatch: [{ kind: "dispatch", code: "dispatched" }],
+      skip: [{ dispatched: false, code: "status_not_todo" }],
+      error: [],
+      reconcile: [],
+      retry: [{ kind: "retry", code: "retry_dispatched" }],
+      pause: [],
+    },
+  );
 });
 
 test("task badges expose eligibility reasons and active run states", () => {
@@ -218,6 +245,136 @@ test("review gate helpers derive review state and safe actions from public task 
   assert.equal(reviewGateState(task({ status: "todo" })), "not_reviewable");
 });
 
+test("validation summary helpers derive compact review evidence states", () => {
+  const handoff = {
+    summary: "Ready",
+    filesChanged: ["app/page.tsx"],
+    validationEvidence: [],
+  };
+
+  assert.equal(validationSummaryState(task({ status: "todo" })), "unknown");
+  assert.equal(validationSummaryState(task({ status: "in_review", handoff })), "missing");
+  assert.equal(validationSummaryLabel(task({ status: "in_review", handoff })), "Validation missing");
+  assert.deepEqual(validationBadgeForTask(task({ status: "in_review", handoff })), {
+    label: "Validation missing",
+    tone: "neutral",
+  });
+
+  const notRun = task({
+    status: "in_review",
+    handoff: {
+      ...handoff,
+      validationEvidence: [
+        {
+          label: "Machine validation",
+          status: "not_run",
+          detail: "No machine validation command was configured.",
+        },
+      ],
+    },
+  });
+  assert.equal(validationSummaryState(notRun), "not_run");
+  assert.equal(validationSummaryLabel(notRun), "Validation missing");
+
+  const failed = task({
+    status: "in_review",
+    handoff: {
+      ...handoff,
+      validationEvidence: [
+        {
+          label: "Tests",
+          status: "failed",
+          detail: "Tests failed. Review the private run output locally.",
+        },
+      ],
+    },
+  });
+  assert.equal(validationSummaryState(failed), "failed");
+  assert.equal(validationSummaryLabel(failed), "Validation failed");
+  assert.equal(hasFailedRequiredValidation(failed), true);
+  assert.deepEqual(validationBadgeForTask(failed), {
+    label: "Validation failed",
+    tone: "warning",
+  });
+
+  const passed = task({
+    status: "in_review",
+    handoff: {
+      ...handoff,
+      validationEvidence: [
+        { label: "Typecheck", status: "passed", detail: "Typecheck passed." },
+      ],
+    },
+  });
+  assert.equal(validationSummaryState(passed), "passed");
+  assert.equal(validationSummaryLabel(passed), "Validation passed");
+  assert.equal(hasFailedRequiredValidation(passed), false);
+  assert.equal(validationBadgeForTask(passed), null);
+});
+
+test("operational badges expose sparse Harness reliability states", () => {
+  assert.deepEqual(
+    taskOperationalBadge(
+      task({
+        status: "paused",
+        pausedReason: "waiting_for_sync",
+        pausedExplanation: "Transient Codex App Server error. Retry scheduled in 30 seconds.",
+        run: {
+          id: "run-1",
+          state: "failed",
+          retryAt: "2026-05-29T12:00:00Z",
+          failureClass: "transient_provider",
+        },
+      }),
+    ),
+    {
+      label: "Retry scheduled",
+      tone: "neutral",
+      reason: "2026-05-29T12:00:00Z",
+    },
+  );
+
+  assert.deepEqual(
+    taskOperationalBadge(
+      task({
+        status: "paused",
+        pausedReason: "run_failed",
+        pausedExplanation: "Run was marked failed because it stopped updating.",
+      }),
+    ),
+    {
+      label: "Run stale",
+      tone: "warning",
+      reason: "Run was marked failed because it stopped updating.",
+    },
+  );
+
+  assert.deepEqual(
+    taskOperationalBadge(task({ status: "paused", pausedReason: "blocked_by_setup" })),
+    { label: "Setup blocked", tone: "warning", reason: undefined },
+  );
+
+  assert.deepEqual(
+    taskOperationalBadge(
+      task({
+        status: "paused",
+        pausedReason: "run_failed",
+        pausedExplanation: "The Coding Assistant did not produce any files that can be reviewed.",
+      }),
+    ),
+    {
+      label: "No reviewable files",
+      tone: "warning",
+      reason: "The Coding Assistant did not produce any files that can be reviewed.",
+    },
+  );
+
+  assert.deepEqual(taskOperationalBadge(task(), { paused: true }), {
+    label: "Automation paused",
+    tone: "neutral",
+  });
+});
+
 test("blocked, in-review, polling, timeline, and handoff displays are derived without raw logs", () => {
   assert.deepEqual(
     harnessStatusForTask(
@@ -347,12 +504,16 @@ test("task page copy separates Clarise planning from Codex implementation and hi
   assert.match(taskPage, /Origin/);
   assert.match(taskPage, /Why it started/);
   assert.match(taskPage, /Current state/);
+  assert.match(taskPage, /Harness state/);
+  assert.match(taskPage, /Retry scheduled\. Harness will retry this task/);
   assert.match(taskPage, /Review branch/);
   assert.match(taskPage, /Curated summary/);
   assert.match(taskPage, /Proof needed/);
   assert.match(taskPage, /Changed files/);
   assert.match(taskPage, /Validation evidence/);
   assert.match(taskPage, /Next action/);
+  assert.match(taskPage, /Required validation failed/);
+  assert.match(taskPage, /requesting changes is\s+recommended/);
   assert.match(taskPage, /No automatic merge will happen/);
   assert.match(taskPage, /Symphonia will not merge it automatically/);
   assert.match(taskPage, /Base branch/);
@@ -371,8 +532,16 @@ test("task page copy separates Clarise planning from Codex implementation and hi
 
 test("task board uses shared review gate helpers without opening SSE streams", async () => {
   const tasksView = await readFile(new URL("../components/tasks-view.tsx", import.meta.url), "utf8");
+  const settingsView = await readFile(new URL("../components/settings-view.tsx", import.meta.url), "utf8");
 
   assert.match(tasksView, /reviewGateLabel/);
   assert.match(tasksView, /reviewGateState/);
+  assert.match(tasksView, /validationBadgeForTask/);
+  assert.match(tasksView, /taskOperationalBadge/);
   assert.doesNotMatch(tasksView, /EventSource/);
+  assert.match(settingsView, /Pause Harness/);
+  assert.match(settingsView, /Resume Harness/);
+  assert.match(settingsView, /Run check now/);
+  assert.match(settingsView, /Recent decisions/);
+  assert.match(settingsView, /groupHarnessDecisions/);
 });

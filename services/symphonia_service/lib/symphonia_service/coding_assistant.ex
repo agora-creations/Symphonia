@@ -64,6 +64,11 @@ defmodule SymphoniaService.CodingAssistant do
         "task" => task_key,
         "kind" => "daemon_assignment",
         "eligibility_reason" => Map.get(params, "eligibility_reason"),
+        "attempt" => Map.get(params, "attempt", 0),
+        "max_attempts" =>
+          Map.get(params, "max_attempts", SymphoniaService.Harness.RetryPolicy.max_attempts()),
+        "retry_of" => Map.get(params, "retry_of"),
+        "retry_reason" => Map.get(params, "retry_reason"),
         "codex_thread_id" => previous_codex_thread_id(task)
       })
 
@@ -213,6 +218,7 @@ defmodule SymphoniaService.CodingAssistant do
   defp ensure_assignable!(%{"status" => "paused", "pausedReason" => "run_failed"}), do: :ok
   defp ensure_assignable!(%{"status" => "paused", "pausedReason" => "blocked_by_setup"}), do: :ok
   defp ensure_assignable!(%{"status" => "paused", "pausedReason" => "waiting_for_user"}), do: :ok
+  defp ensure_assignable!(%{"status" => "paused", "pausedReason" => "waiting_for_sync"}), do: :ok
 
   defp ensure_assignable!(_task) do
     raise ArgumentError,
@@ -270,6 +276,10 @@ defmodule SymphoniaService.CodingAssistant do
       "eligibility_reason" => run["eligibility_reason"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],
+      "retry_at" => run["retry_at"],
+      "failure_class" => run["failure_class"],
+      "attempt" => run["attempt"],
+      "max_attempts" => run["max_attempts"],
       "started_at" => run["started_at"],
       "completed_at" => run["completed_at"]
     }

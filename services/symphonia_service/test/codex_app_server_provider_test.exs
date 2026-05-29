@@ -57,6 +57,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     previous_args_file = System.get_env("FAKE_APP_SERVER_ARGS_FILE")
     previous_fake_mode = System.get_env("FAKE_APP_SERVER_MODE")
     previous_output_suffix = System.get_env("FAKE_APP_SERVER_OUTPUT_SUFFIX")
+    previous_excluded_write = System.get_env("FAKE_APP_SERVER_WRITE_EXCLUDED")
 
     System.put_env("SYMPHONIA_GITHUB_APP_ID", "42")
     System.put_env("SYMPHONIA_GITHUB_APP_PRIVATE_KEY_PATH", private_key_path)
@@ -86,6 +87,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
       restore_env("FAKE_APP_SERVER_ARGS_FILE", previous_args_file)
       restore_env("FAKE_APP_SERVER_MODE", previous_fake_mode)
       restore_env("FAKE_APP_SERVER_OUTPUT_SUFFIX", previous_output_suffix)
+      restore_env("FAKE_APP_SERVER_WRITE_EXCLUDED", previous_excluded_write)
       Application.delete_env(:symphonia_service, :github_client)
       Application.delete_env(:symphonia_service, :github_home)
       File.rm_rf(root)
@@ -188,13 +190,13 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     assert task["handoff"]["nextReviewAction"] ==
              "Review the changed files and approve them to open a pull request."
 
-    assert [_first_evidence | _rest] = task["handoff"]["validationEvidence"]
-
-    assert Enum.all?(task["handoff"]["validationEvidence"], fn evidence ->
-             evidence["status"] == "not_run" and is_binary(evidence["label"]) and
-               evidence["detail"] ==
-                 "No machine validation evidence was recorded for this expectation."
-           end)
+    assert [
+             %{
+               "label" => "Machine validation",
+               "status" => "not_run",
+               "detail" => "No machine validation command was configured."
+             }
+           ] = task["handoff"]["validationEvidence"]
 
     branch_files =
       git_output!([
@@ -281,6 +283,192 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     assert [%{"code" => "max_concurrent_runs_reached"} | _rest] = result["decisions"]
   end
 
+  test "harness pause persists and blocks manual tick", %{
+    registry_path: registry_path
+  } do
+    name = :"harness_daemon_pause_test_#{System.unique_integer([:positive])}"
+    {:ok, pid} = Daemon.start_link(registry_path: registry_path, timer?: false, name: name)
+
+    paused = Daemon.pause(name)
+    assert paused["paused"] == true
+    assert [%{"code" => "harness_paused", "kind" => "pause"}] = paused["decisions"]
+
+    tick = Daemon.tick(name)
+    assert tick["paused"] == true
+    refute Enum.any?(tick["decisions"], &(&1["dispatched"] == true))
+    assert Enum.any?(tick["decisions"], &(&1["code"] == "harness_paused"))
+
+    GenServer.stop(pid)
+
+    restarted_name = :"harness_daemon_pause_restart_test_#{System.unique_integer([:positive])}"
+    {:ok, _pid} = Daemon.start_link(registry_path: registry_path, timer?: false, name: restarted_name)
+
+    assert Daemon.status(restarted_name)["paused"] == true
+    assert Daemon.resume(restarted_name)["paused"] == false
+    assert Daemon.status(restarted_name)["paused"] == false
+  end
+
+  test "daemon startup reconciles stale active run before dispatch", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    [task | _rest] = TaskStore.list_tasks(repository)
+
+    stale_at = DateTime.utc_now() |> DateTime.add(-7200, :second) |> DateTime.to_iso8601()
+
+    run =
+      RunStore.create(
+        %{
+          "provider" => "codex_app_server",
+          "repository" => repository["key"],
+          "task" => task["key"],
+          "kind" => "daemon_assignment"
+        },
+        root: runs_root
+      )
+      |> RunStore.mark_running(root: runs_root)
+      |> Map.merge(%{"started_at" => stale_at, "updated_at" => stale_at})
+
+    rewrite_run!(runs_root, run)
+
+    TaskStore.apply_event(repository, task["key"], "start")
+
+    TaskStore.patch_task(repository, task["key"], %{
+      "frontmatter" => %{"run" => task_run_frontmatter(run)}
+    })
+
+    name = :"harness_daemon_reconcile_start_test_#{System.unique_integer([:positive])}"
+
+    {:ok, _pid} =
+      Daemon.start_link(
+        registry_path: registry_path,
+        timer?: false,
+        name: name,
+        running_stale_after_ms: 0,
+        heartbeat_stale_after_ms: 0
+      )
+
+    reconciled_run = RunStore.get(run["id"], root: runs_root)
+    reconciled_task = TaskStore.get_task(repository, task["key"])
+
+    assert reconciled_run["state"] == "failed"
+    assert reconciled_task["status"] == "paused"
+    assert reconciled_task["pausedReason"] == "run_failed"
+    assert Daemon.status(name)["lastReconciliation"]["stale"] >= 1
+
+    tick = Daemon.tick(name)
+    refute Enum.any?(tick["decisions"], &(&1["code"] == "dispatched"))
+  end
+
+  test "due retry creates a linked daemon run before normal eligibility", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    [task | _rest] = TaskStore.list_tasks(repository)
+    failed_run = retryable_failed_run!(repository, task, runs_root, -30)
+
+    name = :"harness_daemon_due_retry_test_#{System.unique_integer([:positive])}"
+    {:ok, _pid} = Daemon.start_link(registry_path: registry_path, timer?: false, name: name)
+
+    result = Daemon.tick(name)
+
+    assert Enum.any?(result["decisions"], &(&1["code"] == "retry_dispatched"))
+
+    retried_run =
+      runs_root
+      |> Path.join("run_*.json")
+      |> Path.wildcard()
+      |> Enum.map(&(File.read!(&1) |> JSON.decode!()))
+      |> Enum.find(&(&1["retry_of"] == failed_run["id"]))
+
+    assert retried_run["attempt"] == 1
+    assert retried_run["max_attempts"] == 2
+
+    wait_for_run(runs_root, retried_run["id"], "completed")
+  end
+
+  test "retry waits for retryAt and respects harness pause", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    [task | _rest] = TaskStore.list_tasks(repository)
+    failed_run = retryable_failed_run!(repository, task, runs_root, 120)
+
+    name = :"harness_daemon_retry_wait_test_#{System.unique_integer([:positive])}"
+    {:ok, _pid} = Daemon.start_link(registry_path: registry_path, timer?: false, name: name)
+
+    future_tick = Daemon.tick(name)
+    refute Enum.any?(future_tick["decisions"], &(&1["code"] == "retry_dispatched"))
+
+    failed_run =
+      failed_run
+      |> Map.put("retry_at", DateTime.utc_now() |> DateTime.add(-30, :second) |> DateTime.to_iso8601())
+      |> tap(&rewrite_run!(runs_root, &1))
+
+    Daemon.pause(name)
+    paused_tick = Daemon.tick(name)
+    refute Enum.any?(paused_tick["decisions"], &(&1["code"] == "retry_dispatched"))
+
+    assert RunStore.get(failed_run["id"], root: runs_root)["retry_at"]
+  end
+
+  test "retry is skipped when a handoff appears before retryAt", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    [task | _rest] = TaskStore.list_tasks(repository)
+    failed_run = retryable_failed_run!(repository, task, runs_root, -30)
+
+    TaskStore.patch_task(repository, task["key"], %{
+      "frontmatter" => %{
+        "status" => "in_review",
+        "handoff" => %{
+          "summary" => "Ready",
+          "files_changed" => ["app/file.ts"],
+          "next_review_action" => "Review."
+        }
+      }
+    })
+
+    name = :"harness_daemon_retry_handoff_test_#{System.unique_integer([:positive])}"
+    {:ok, _pid} = Daemon.start_link(registry_path: registry_path, timer?: false, name: name)
+
+    result = Daemon.tick(name)
+    refute Enum.any?(result["decisions"], &(&1["code"] == "retry_dispatched"))
+    assert Enum.any?(result["decisions"], &(&1["code"] == "retry_no_longer_allowed"))
+    refute RunStore.get(failed_run["id"], root: runs_root)["retry_at"]
+  end
+
+  test "exhausted transient daemon retry budget pauses without another retry", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    [task | _rest] = TaskStore.list_tasks(repository)
+    System.put_env("FAKE_APP_SERVER_MODE", "silent_initialize")
+    System.put_env("SYMPHONIA_CODEX_STARTUP_TIMEOUT_MS", "250")
+
+    result =
+      CodingAssistant.start_harness_run(registry_path, repository, task["key"], %{
+        "eligibility_reason" => "Retrying transient Harness failure.",
+        "attempt" => 2,
+        "max_attempts" => 2
+      })
+
+    run = wait_for_run(runs_root, result["run"]["id"], "failed")
+    task = wait_for_task_status(repository, task["key"], "paused")
+
+    assert run["failure_class"] == "transient_provider"
+    refute run["retry_at"]
+    assert run["message"] =~ "reached the retry limit"
+    assert task["pausedReason"] == "run_failed"
+    assert task["pausedExplanation"] =~ "reached the retry limit"
+  end
+
   test "local workspace provider release preserves persistent task worktree", %{
     repository: repository
   } do
@@ -324,7 +512,130 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     assert run["provider"] == "codex_app_server"
     assert task["handoff"]["headBranch"] == "symphonia/task/#{String.downcase(task["key"])}"
     assert "app/app-server-output.txt" in task["handoff"]["filesChanged"]
-    assert length(task["handoff"]["validationEvidence"]) == 2
+
+    assert [
+             %{
+               "label" => "Machine validation",
+               "status" => "not_run",
+               "detail" => "No machine validation command was configured."
+             }
+           ] = task["handoff"]["validationEvidence"]
+  end
+
+  test "Codex App Server run attaches passing workflow validation evidence", %{
+    registry_path: registry_path,
+    repository: repository,
+    remote_path: remote_path,
+    runs_root: runs_root
+  } do
+    commit_workflow_validation!(
+      repository["path"],
+      "Smoke validation",
+      "test -f app/app-server-output.txt && printf APP_TOKEN=secret:/Users/example/private"
+    )
+
+    [task | _rest] = TaskStore.list_tasks(repository)
+    result = CodingAssistant.start_run(registry_path, repository, task["key"])
+    run = wait_for_run(runs_root, result["run"]["id"], "completed")
+    task = wait_for_task_status(repository, task["key"], "in_review")
+
+    assert [
+             %{
+               "label" => "Smoke validation",
+               "status" => "passed",
+               "detail" => "Smoke validation passed."
+             }
+           ] = task["handoff"]["validationEvidence"]
+
+    validation = run["provider_output"]["validation"]
+    assert validation["policy"]["source"] == "workflow"
+    assert [%{"output" => private_output}] = validation["results"]
+    assert private_output =~ "APP_TOKEN=secret:/Users/example/private"
+
+    summary =
+      git_output!([
+        "--git-dir",
+        remote_path,
+        "show",
+        "refs/heads/symphonia/task/sym-1:#{run["curated_summary_path"]}"
+      ])
+
+    assert summary =~ "Smoke validation: Passed - Smoke validation passed."
+    refute summary =~ "APP_TOKEN=secret"
+    refute summary =~ "/Users/example/private"
+  end
+
+  test "failed required validation keeps handoff in review with warning evidence", %{
+    registry_path: registry_path,
+    repository: repository,
+    remote_path: remote_path,
+    runs_root: runs_root
+  } do
+    commit_workflow_validation!(
+      repository["path"],
+      "Required tests",
+      "printf APP_SECRET=hidden:/Users/example/private && exit 2"
+    )
+
+    [task | _rest] = TaskStore.list_tasks(repository)
+    result = CodingAssistant.start_run(registry_path, repository, task["key"])
+    run = wait_for_run(runs_root, result["run"]["id"], "completed")
+    task = wait_for_task_status(repository, task["key"], "in_review")
+
+    assert task["handoff"]["nextReviewAction"] ==
+             "Review the failed validation before approving. Request changes if Codex should fix it."
+
+    assert [
+             %{
+               "label" => "Required tests",
+               "status" => "failed",
+               "detail" => "Required tests failed. Review the private run output locally."
+             }
+           ] = task["handoff"]["validationEvidence"]
+
+    assert get_in(run, ["provider_output", "validation", "results", Access.at(0), "output"]) =~
+             "APP_SECRET=hidden:/Users/example/private"
+
+    summary =
+      git_output!([
+        "--git-dir",
+        remote_path,
+        "show",
+        "refs/heads/symphonia/task/sym-1:#{run["curated_summary_path"]}"
+      ])
+
+    assert summary =~
+             "Required tests: Failed - Required tests failed. Review the private run output locally."
+
+    refute summary =~ "APP_SECRET=hidden"
+    refute summary =~ "/Users/example/private"
+  end
+
+  test "validation runs after excluded paths are reverted", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    commit_workflow_validation!(
+      repository["path"],
+      "Excluded cleanup",
+      "test ! -e symphonia/tasks/SYM-1.md"
+    )
+
+    System.put_env("FAKE_APP_SERVER_WRITE_EXCLUDED", "symphonia/tasks/SYM-1.md")
+
+    [task | _rest] = TaskStore.list_tasks(repository)
+    result = CodingAssistant.start_run(registry_path, repository, task["key"])
+    wait_for_run(runs_root, result["run"]["id"], "completed")
+    task = wait_for_task_status(repository, task["key"], "in_review")
+
+    assert [
+             %{
+               "label" => "Excluded cleanup",
+               "status" => "passed",
+               "detail" => "Excluded cleanup passed."
+             }
+           ] = task["handoff"]["validationEvidence"]
   end
 
   test "missing managed Codex standalone pauses task with clear setup blocker and remains retryable",
@@ -664,6 +975,79 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     MilestoneLoop.approve(repository, milestone["id"])["milestone"]
   end
 
+  defp retryable_failed_run!(repository, task, runs_root, retry_offset_seconds) do
+    retry_at =
+      DateTime.utc_now()
+      |> DateTime.add(retry_offset_seconds, :second)
+      |> DateTime.to_iso8601()
+
+    run =
+      RunStore.create(
+        %{
+          "provider" => "codex_app_server",
+          "repository" => repository["key"],
+          "task" => task["key"],
+          "kind" => "daemon_assignment",
+          "attempt" => 0,
+          "max_attempts" => 2
+        },
+        root: runs_root
+      )
+      |> RunStore.mark_failed(
+        "Codex App Server did not respond during startup.",
+        "Transient Codex App Server error. Retry scheduled in 30 seconds.",
+        root: runs_root
+      )
+      |> RunStore.update_metadata(
+        %{
+          "failure_class" => "transient_provider",
+          "retry_at" => retry_at,
+          "retry_reason" => "Transient Codex App Server error. Retry scheduled in 30 seconds."
+        },
+        root: runs_root
+      )
+
+    TaskStore.apply_event(repository, task["key"], "fail_run", %{
+      "explanation" => run["message"],
+      "paused_reason" => "waiting_for_sync"
+    })
+
+    TaskStore.patch_task(repository, task["key"], %{
+      "frontmatter" => %{"run" => task_run_frontmatter(run)}
+    })
+
+    run
+  end
+
+  defp rewrite_run!(runs_root, run) do
+    path = RunStore.path(run, root: runs_root)
+    File.write!(path, JSON.encode!(run))
+    run
+  end
+
+  defp task_run_frontmatter(run) do
+    %{
+      "id" => run["id"],
+      "kind" => run["kind"],
+      "state" => run["state"],
+      "current_step" => run["current_step"],
+      "message" => run["message"],
+      "display_step" => SymphoniaService.CodingAssistant.RunEvents.display_step(run),
+      "display_message" => SymphoniaService.CodingAssistant.RunEvents.display_message(run),
+      "eligibility_reason" => run["eligibility_reason"],
+      "review_branch" => run["review_branch"],
+      "curated_summary_path" => run["curated_summary_path"],
+      "retry_at" => run["retry_at"],
+      "failure_class" => run["failure_class"],
+      "attempt" => run["attempt"],
+      "max_attempts" => run["max_attempts"],
+      "started_at" => run["started_at"],
+      "completed_at" => run["completed_at"]
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
   defp wait_for_latest_run(runs_root, state, attempts \\ 80) do
     run =
       runs_root
@@ -714,6 +1098,36 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     end
   end
 
+  defp commit_workflow_validation!(repo_path, label, command) do
+    File.write!(Path.join(repo_path, "WORKFLOW.md"), """
+    # WORKFLOW.md
+
+    validation:
+      required:
+        - label: #{label}
+          command: #{command}
+
+    on_run_complete:
+      - status: in_review
+    """)
+
+    git_output!(["-C", repo_path, "add", "WORKFLOW.md"])
+
+    git_output!([
+      "-C",
+      repo_path,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      "Add validation workflow"
+    ])
+
+    git_output!(["-C", repo_path, "push", "origin", "main"])
+  end
+
   defp wait_for_task_status(repository, task_key, status, attempts \\ 80) do
     task = TaskStore.get_task(repository, task_key)
 
@@ -740,6 +1154,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     const argsFile = process.env.FAKE_APP_SERVER_ARGS_FILE;
     const mode = process.env.FAKE_APP_SERVER_MODE || "success";
     const outputSuffix = process.env.FAKE_APP_SERVER_OUTPUT_SUFFIX || "";
+    const excludedWrite = process.env.FAKE_APP_SERVER_WRITE_EXCLUDED;
     const requests = [];
 
     if (argsFile) {
@@ -774,6 +1189,11 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
         if (mode !== "no_change") {
           fs.mkdirSync(cwd + "/app", { recursive: true });
           fs.writeFileSync(cwd + "/app/app-server-output.txt", "Fake App Server work product" + outputSuffix + "\\n");
+          if (excludedWrite) {
+            const excludedPath = cwd + "/" + excludedWrite;
+            fs.mkdirSync(require("path").dirname(excludedPath), { recursive: true });
+            fs.writeFileSync(excludedPath, "Excluded fake App Server output\\n");
+          }
         }
         send({ jsonrpc: "2.0", id: message.id, result: { turn: { id: "turn-fake", status: "running" } } });
         if (mode === "malformed_json") {

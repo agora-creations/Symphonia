@@ -19,6 +19,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
   }
 
   alias SymphoniaService.Runner.LocalGitWorktreeProvider
+  alias SymphoniaService.Validation.{Evidence, Policy, Runner}
 
   @impl true
   def id, do: "codex_app_server"
@@ -56,8 +57,16 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
                    invoke_app_server(repository, task["key"], run, context.repo_path, prompt),
                  {:ok, changes} <- detect_and_clean_changes(run, context.repo_path),
                  :ok <- ensure_committable_changes(changes),
+                 {:ok, validation} <- run_validation(run, context.repo_path, task),
                  {:ok, summary_path} <-
-                   write_summary(run, context.repo_path, task, changes, output),
+                   write_summary(
+                     run,
+                     context.repo_path,
+                     task,
+                     changes,
+                     output,
+                     validation["public_evidence"]
+                   ),
                  :ok <- commit_and_push(run, context, task, changes, summary_path) do
               files_changed = Enum.sort(changes["committable"] ++ [summary_path])
 
@@ -66,11 +75,13 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
                   task,
                   context,
                   files_changed,
-                  output["last_message"]
+                  output["last_message"],
+                  validation["public_evidence"]
                 )
                 |> Map.put("head_branch", context.head_branch)
                 |> Map.put("base_branch", context.base_branch)
                 |> Map.put("curated_summary_path", summary_path)
+                |> maybe_failed_validation_next_action(validation["results"])
 
               {:ok, handoff}
             else
@@ -199,20 +210,57 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
 
   defp ensure_committable_changes(_changes), do: :ok
 
-  defp write_summary(run, repo_path, task, changes, output) do
+  defp run_validation(run, repo_path, task) do
+    RunStore.mark_step(run, "Running validation")
+
+    policy = Policy.load(repo_path, task)
+    {:ok, results} = Runner.run(repo_path, policy)
+    public_evidence = Evidence.public(results)
+
+    RunStore.record_provider_output(run, %{
+      "validation" => %{
+        "policy" => policy,
+        "results" => results
+      }
+    })
+
+    {:ok,
+     %{
+       "policy" => policy,
+       "results" => results,
+       "public_evidence" => public_evidence
+     }}
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  defp write_summary(run, repo_path, task, changes, output, validation_evidence) do
     summary_path =
       CuratedSummary.write!(
         repo_path,
         task,
         RunStore.get(run["id"]) || run,
         changes["committable"],
-        output["last_message"]
+        output["last_message"],
+        validation_evidence
       )
 
     RunStore.update_metadata(run, %{"curated_summary_path" => summary_path})
     {:ok, summary_path}
   rescue
     error -> {:error, Exception.message(error)}
+  end
+
+  defp maybe_failed_validation_next_action(handoff, results) do
+    if Evidence.has_failed_required?(results) do
+      Map.put(
+        handoff,
+        "next_review_action",
+        "Review the failed validation before approving. Request changes if Codex should fix it."
+      )
+    else
+      handoff
+    end
   end
 
   defp commit_and_push(run, context, task, changes, summary_path) do

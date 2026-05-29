@@ -13,6 +13,7 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
     RunStore
   }
 
+  alias SymphoniaService.Harness.RetryPolicy
   alias SymphoniaService.TaskStore
 
   @canceled_message "Run canceled. The task is paused. You can retry when ready."
@@ -110,6 +111,28 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
     end
   end
 
+  defp handle_provider_error(%{"kind" => "daemon_assignment"} = state, run, reason) do
+    public_message = failure_explanation_for_state(state, reason)
+    failed_run = RunStore.mark_failed(run, reason, public_message)
+
+    case RetryPolicy.schedule(failed_run, reason, public_message) do
+      {:retry, attrs} ->
+        retry_run = RunStore.update_metadata(failed_run, attrs)
+        task = fail_task(state, retry_run, attrs["message"], "waiting_for_sync")
+        {:done, retry_run, task}
+
+      {:exhausted, attrs} ->
+        retry_run = RunStore.update_metadata(failed_run, attrs)
+        task = fail_task(state, retry_run, attrs["message"], "run_failed")
+        {:done, retry_run, task}
+
+      {:no_retry, attrs} ->
+        failed_run = RunStore.update_metadata(failed_run, attrs)
+        task = fail_task(state, failed_run, public_message, paused_reason_for(public_message))
+        {:done, failed_run, task}
+    end
+  end
+
   defp handle_provider_error(%{"kind" => "review_continuation"} = state, run, reason) do
     attempt = state["attempt"]
     max_attempts = state["max_attempts"]
@@ -170,10 +193,14 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
   end
 
   defp fail_task(state, run, public_message) do
+    fail_task(state, run, public_message, paused_reason_for(public_message))
+  end
+
+  defp fail_task(state, run, public_message, paused_reason) do
     state["repository"]
     |> TaskStore.apply_event(state["task_key"], "fail_run", %{
       "explanation" => public_message,
-      "paused_reason" => paused_reason_for(public_message)
+      "paused_reason" => paused_reason
     })
     |> then(fn _task -> put_task_run(state["repository"], state["task_key"], run) end)
   end
@@ -241,6 +268,10 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
       "eligibility_reason" => run["eligibility_reason"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],
+      "retry_at" => run["retry_at"],
+      "failure_class" => run["failure_class"],
+      "attempt" => run["attempt"],
+      "max_attempts" => run["max_attempts"],
       "started_at" => run["started_at"],
       "completed_at" => run["completed_at"]
     }

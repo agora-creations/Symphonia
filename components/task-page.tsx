@@ -29,6 +29,7 @@ import {
   activeRunPollingTarget,
   canOpenPullRequest,
   canRequestChanges,
+  hasFailedRequiredValidation,
   isActiveRun,
   isReviewReady,
   prStateLabel,
@@ -41,7 +42,9 @@ import {
   runTimelineForTask,
   safeReviewBranch,
   safeSummaryPath,
+  taskOperationalBadge,
   terminalRunStateLabel,
+  validationSummaryLabel,
 } from "@/lib/harness-ui-model";
 
 interface Props {
@@ -961,6 +964,7 @@ function TaskMeta({
   const allowedReason = run?.eligibilityReason ?? eligibility?.reason;
   const recoveryMessage = recoveryMessageForTask(task);
   const gateState = reviewGateState(task);
+  const operationalBadge = taskOperationalBadge(task);
   const reviewFocused = task.status === "in_review" && Boolean(task.handoff);
 
   useEffect(() => {
@@ -998,6 +1002,27 @@ function TaskMeta({
           {runDisplay.message && <p>{runDisplay.message}</p>}
         </div>
       </Section>
+      {operationalBadge && (
+        <Section title="Harness state">
+          <div className="space-y-1">
+            <span
+              className={cn(
+                "inline-flex rounded-md border px-2 py-0.5",
+                operationalBadge.tone === "warning"
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  : operationalBadge.tone === "ready"
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "text-muted-foreground",
+              )}
+            >
+              {operationalBadge.label}
+            </span>
+            {operationalBadge.reason && (
+              <p className="text-muted-foreground">{operationalBadge.reason}</p>
+            )}
+          </div>
+        </Section>
+      )}
       {recoveryMessage && (
         <Section title="Recovery">
           <p className="text-muted-foreground">{recoveryMessage}</p>
@@ -1169,6 +1194,7 @@ function ReviewDecisionPanel({
       : action.kind === "request_changes" || action.kind === "open_pull_request",
   );
   const requestChangesBlocked = task.githubPrState === "open";
+  const failedValidation = hasFailedRequiredValidation(task);
 
   return (
     <Panel title="Review Decision">
@@ -1186,6 +1212,15 @@ function ReviewDecisionPanel({
           {reviewGateLabel(task)}
         </span>
       </Section>
+      {failedValidation && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-amber-800 dark:text-amber-200">
+          <p className="text-xs font-medium">{validationSummaryLabel(task)}</p>
+          <p className="mt-0.5 text-xs">
+            Required validation failed. You can still approve, but requesting changes is
+            recommended.
+          </p>
+        </div>
+      )}
       {decisionActions.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {decisionActions.map((action) => (
@@ -1444,6 +1479,10 @@ function recoveryMessageForTask(task: ServiceTask): string | undefined {
 
   if (task.pausedReason === "waiting_for_user") {
     return "Codex needs input before continuing.";
+  }
+
+  if (task.pausedReason === "waiting_for_sync") {
+    return "Retry scheduled. Harness will retry this task when the backoff expires.";
   }
 
   if (task.pausedReason === "run_failed") {

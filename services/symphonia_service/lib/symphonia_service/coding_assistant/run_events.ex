@@ -28,6 +28,7 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
     "Codex is working" => "Codex is working",
     "Running Coding Assistant" => "Starting Codex",
     "Detecting changed files" => "Checking changes",
+    "Running validation" => "Running validation",
     "Creating branch" => "Checking changes",
     "Creating review branch" => "Checking changes",
     "Writing handoff" => "Writing handoff"
@@ -76,6 +77,7 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
       "Codex is working" -> "Codex is working from the task brief."
       "Starting Codex" -> "Codex is working from the task brief."
       "Checking changes" -> "Codex finished its turn and Symphonia is checking the changed files."
+      "Running validation" -> "Symphonia is running local validation for the handoff."
       "Writing handoff" -> "Symphonia is writing a review handoff."
       _ -> "Codex is working on this task."
     end

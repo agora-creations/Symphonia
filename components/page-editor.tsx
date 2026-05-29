@@ -17,9 +17,16 @@ interface Props {
  * category, we return notFound so the user lands on the section list.
  */
 export function PageEditor({ repoKey, pageId, category }: Props) {
-  const { byId } = useDocs();
+  const { byId, hydrated } = useDocs();
   const page = byId(pageId);
-  if (!page || page.repo !== repoKey || (category && page.category !== category)) {
+  if (!hydrated) {
+    return (
+      <div className="grid h-full place-items-center text-sm text-muted-foreground">
+        Loading document...
+      </div>
+    );
+  }
+  if (!page || page.archived || page.repo !== repoKey || (category && page.category !== category)) {
     notFound();
   }
   return <MarkdownEditor page={page!} />;

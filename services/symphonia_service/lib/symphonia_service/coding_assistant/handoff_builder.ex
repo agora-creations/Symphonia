@@ -27,8 +27,9 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
     body |> String.trim_trailing() |> Kernel.<>("\n")
   end
 
-  def build(task, branch) do
+  def build(task, branch, validation_evidence \\ nil) do
     file = demo_file(task)
+    validation_evidence = validation_evidence || ValidationEvidence.from_task(task)
 
     %{
       "summary" => "Created a demo output file for this task.",
@@ -36,12 +37,19 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
       "next_review_action" => "Review the demo output and approve it to open a pull request.",
       "head_branch" => branch["head_branch"],
       "base_branch" => branch["base_branch"],
-      "validation_evidence" => ValidationEvidence.from_task(task)
+      "validation_evidence" => ValidationEvidence.normalize(validation_evidence)
     }
   end
 
-  def build_from_changes(task, branch, files_changed, summary \\ nil) do
+  def build_from_changes(
+        task,
+        branch,
+        files_changed,
+        summary \\ nil,
+        validation_evidence \\ nil
+      ) do
     files_changed = Enum.sort(files_changed)
+    validation_evidence = validation_evidence || ValidationEvidence.from_task(task)
 
     %{
       "summary" => clean_summary(summary, files_changed),
@@ -49,7 +57,7 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
       "next_review_action" => "Review the changed files and approve them to open a pull request.",
       "head_branch" => branch["head_branch"],
       "base_branch" => branch["base_branch"],
-      "validation_evidence" => ValidationEvidence.from_task(task)
+      "validation_evidence" => ValidationEvidence.normalize(validation_evidence)
     }
   end
 

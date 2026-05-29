@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Smile,
   ImagePlus,
@@ -16,9 +17,18 @@ import {
   ListChecks,
   Quote,
   Code,
+  Heading3,
+  ListOrdered,
+  Type,
+  MoreHorizontal,
 } from "lucide-react";
 import { COMMON_ICONS, COVERS, useDocs, type DocPage } from "@/lib/docs-store";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+
+type EditorPatch = Partial<
+  Pick<DocPage, "title" | "body" | "icon" | "cover" | "published">
+>;
 
 interface Props {
   page: DocPage;
@@ -27,7 +37,7 @@ interface Props {
    * "Save to repository" affordance and the path is computed from the title.
    */
   isDraft?: boolean;
-  onSave?: () => void;
+  onSave?: (patch: EditorPatch) => void | Promise<void>;
   onDiscard?: () => void;
   /** Hide title editing where the title is fixed. */
   fixedTitle?: boolean;
@@ -39,6 +49,16 @@ interface Props {
   belowBodySlot?: React.ReactNode;
   /** Override placeholder for body. */
   bodyPlaceholder?: string;
+}
+
+interface SlashCommand {
+  id: string;
+  section: "Headings" | "Basic blocks" | "Media";
+  label: string;
+  description: string;
+  shortcut?: string;
+  insert: string;
+  icon: React.ReactNode;
 }
 
 /**
@@ -62,18 +82,100 @@ export function MarkdownEditor({
   belowBodySlot,
   bodyPlaceholder,
 }: Props) {
-  const { updateDraft, updatePage } = useDocs();
+  const { archivePage, updateDraft, updatePage } = useDocs();
+  const router = useRouter();
   const update = isDraft ? updateDraft : updatePage;
 
   const [title, setTitle] = useState(page.title);
   const [body, setBody] = useState(page.body);
   const [icon, setIcon] = useState(page.icon);
   const [cover, setCover] = useState(page.cover);
+  const [published, setPublished] = useState(page.published);
   const [savedAt, setSavedAt] = useState<number>(page.updatedAt);
   const [dirty, setDirty] = useState(false);
   const [iconOpen, setIconOpen] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashRange, setSlashRange] = useState<{ start: number; end: number } | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  const slashCommands = useMemo<SlashCommand[]>(
+    () => [
+      {
+        id: "h1",
+        section: "Headings",
+        label: "Heading",
+        description: "Used for a top-level heading",
+        shortcut: "⌘-ALT-1",
+        insert: "# ",
+        icon: <Heading1 className="h-4 w-4" />,
+      },
+      {
+        id: "h2",
+        section: "Headings",
+        label: "Heading 2",
+        description: "Used for key sections",
+        shortcut: "⌘-ALT-2",
+        insert: "## ",
+        icon: <Heading2 className="h-4 w-4" />,
+      },
+      {
+        id: "h3",
+        section: "Headings",
+        label: "Heading 3",
+        description: "Used for subsections and group headings",
+        shortcut: "⌘-ALT-3",
+        insert: "### ",
+        icon: <Heading3 className="h-4 w-4" />,
+      },
+      {
+        id: "bullet",
+        section: "Basic blocks",
+        label: "Bullet List",
+        description: "Used to display an unordered list",
+        shortcut: "⌘-ALT-9",
+        insert: "- ",
+        icon: <ListIcon className="h-4 w-4" />,
+      },
+      {
+        id: "numbered",
+        section: "Basic blocks",
+        label: "Numbered List",
+        description: "Used to display a numbered list",
+        shortcut: "⌘-ALT-7",
+        insert: "1. ",
+        icon: <ListOrdered className="h-4 w-4" />,
+      },
+      {
+        id: "paragraph",
+        section: "Basic blocks",
+        label: "Paragraph",
+        description: "Used for the body of your document",
+        shortcut: "⌘-ALT-0",
+        insert: "",
+        icon: <Type className="h-4 w-4" />,
+      },
+      {
+        id: "image",
+        section: "Media",
+        label: "Image",
+        description: "Insert an image",
+        insert: "![Image]()",
+        icon: <ImagePlus className="h-4 w-4" />,
+      },
+    ],
+    [],
+  );
+
+  const filteredSlashCommands = useMemo(() => {
+    const query = slashQuery.trim().toLowerCase();
+    if (!query) return slashCommands;
+    return slashCommands.filter((command) =>
+      `${command.label} ${command.description}`.toLowerCase().includes(query),
+    );
+  }, [slashCommands, slashQuery]);
 
   // If the underlying page swaps (different route), reset local state.
   useEffect(() => {
@@ -81,34 +183,54 @@ export function MarkdownEditor({
     setBody(page.body);
     setIcon(page.icon);
     setCover(page.cover);
+    setPublished(page.published);
     setSavedAt(page.updatedAt);
     setDirty(false);
   }, [page.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const currentPatch = useCallback(
+    (overrides: EditorPatch = {}): EditorPatch => ({
+      title,
+      body,
+      icon,
+      cover,
+      published,
+      ...overrides,
+    }),
+    [body, cover, icon, published, title],
+  );
+
+  const persistCurrent = useCallback(
+    (overrides: EditorPatch = {}) => {
+      const patch = currentPatch(overrides);
+      update(page.id, patch);
+      setSavedAt(Date.now());
+      setDirty(false);
+      return patch;
+    },
+    [currentPatch, page.id, update],
+  );
 
   // Debounced autosave to store.
   useEffect(() => {
     if (!dirty) return;
     const t = setTimeout(() => {
-      update(page.id, { title, body, icon, cover });
-      setSavedAt(Date.now());
-      setDirty(false);
+      persistCurrent();
     }, 400);
     return () => clearTimeout(t);
-  }, [dirty, title, body, icon, cover, page.id, update]);
+  }, [dirty, persistCurrent]);
 
   // Cmd/Ctrl+S — flush immediately.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        update(page.id, { title, body, icon, cover });
-        setSavedAt(Date.now());
-        setDirty(false);
+        persistCurrent();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [title, body, icon, cover, page.id, update]);
+  }, [persistCurrent]);
 
   const cls = useMemo(
     () => COVERS.find((c) => c.id === cover)?.className,
@@ -135,6 +257,89 @@ export function MarkdownEditor({
     },
     [body],
   );
+
+  const updateSlashState = useCallback((nextBody: string, cursor: number) => {
+    const lineStart = nextBody.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
+    const lineBeforeCursor = nextBody.slice(lineStart, cursor);
+    const match = lineBeforeCursor.match(/^\/([^\n]*)$/);
+
+    if (!match) {
+      setSlashOpen(false);
+      setSlashRange(null);
+      setSlashQuery("");
+      setSlashIndex(0);
+      return;
+    }
+
+    setSlashOpen(true);
+    setSlashRange({ start: lineStart, end: cursor });
+    setSlashQuery(match[1] ?? "");
+    setSlashIndex(0);
+  }, []);
+
+  const applySlashCommand = useCallback(
+    (command: SlashCommand) => {
+      if (!slashRange) return;
+      const next = body.slice(0, slashRange.start) + command.insert + body.slice(slashRange.end);
+      const cursor = slashRange.start + command.insert.length;
+      setBody(next);
+      setDirty(true);
+      setSlashOpen(false);
+      setSlashRange(null);
+      setSlashQuery("");
+      setSlashIndex(0);
+      requestAnimationFrame(() => {
+        bodyRef.current?.focus();
+        bodyRef.current?.setSelectionRange(cursor, cursor);
+      });
+    },
+    [body, slashRange],
+  );
+
+  const onBodyKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!slashOpen) return;
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setSlashOpen(false);
+      setSlashRange(null);
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSlashIndex((index) => (index + 1) % Math.max(filteredSlashCommands.length, 1));
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSlashIndex(
+        (index) =>
+          (index - 1 + Math.max(filteredSlashCommands.length, 1)) %
+          Math.max(filteredSlashCommands.length, 1),
+      );
+      return;
+    }
+
+    if (event.key === "Enter" && filteredSlashCommands[slashIndex]) {
+      event.preventDefault();
+      applySlashCommand(filteredSlashCommands[slashIndex]);
+    }
+  };
+
+  const togglePublished = () => {
+    const next = !published;
+    setPublished(next);
+    persistCurrent({ published: next });
+  };
+
+  const deleteCurrentPage = async () => {
+    await archivePage(page.id);
+    router.push(`/r/${page.repo.toLowerCase()}/docs`);
+  };
+
+  const showDocActions = !isDraft && page.category === "doc";
 
   return (
     <div className={cn("flex h-full flex-col", className)}>
@@ -258,6 +463,44 @@ export function MarkdownEditor({
             <div className="ml-auto flex items-center gap-2">
               {rightToolbarSlot}
               <SaveStatus dirty={dirty} savedAt={savedAt} isDraft={!!isDraft} />
+              {showDocActions && (
+                <>
+                  <button
+                    type="button"
+                    onClick={togglePublished}
+                    className={cn(
+                      "rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                      published
+                        ? "bg-primary text-primary-foreground hover:bg-primary-hover"
+                        : "bg-background text-foreground hover:bg-muted",
+                    )}
+                  >
+                    {published ? "Published" : "Publish"}
+                  </button>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="Page actions"
+                        title="Page actions"
+                        className="grid h-7 w-7 place-items-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-44 p-1">
+                      <button
+                        type="button"
+                        onClick={() => void deleteCurrentPage()}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </button>
+                    </PopoverContent>
+                  </Popover>
+                </>
+              )}
               {isDraft && (
                 <>
                   <button
@@ -267,10 +510,8 @@ export function MarkdownEditor({
                     Discard
                   </button>
                   <button
-                    onClick={() => {
-                      // Flush latest local edits into the draft before saving.
-                      update(page.id, { title, body, icon, cover });
-                      onSave?.();
+                    onClick={async () => {
+                      await onSave?.(persistCurrent());
                     }}
                     disabled={!title.trim()}
                     className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -330,20 +571,32 @@ export function MarkdownEditor({
           </div>
 
           {/* Body */}
-          <textarea
-            ref={bodyRef}
-            value={body}
-            onChange={(e) => {
-              setBody(e.target.value);
-              setDirty(true);
-            }}
-            spellCheck={false}
-            aria-label="Page content"
-            placeholder={
-              bodyPlaceholder ?? "Press 'Cmd/Ctrl+S' to save anytime — formatting is preserved."
-            }
-            className="mt-3 min-h-[40svh] w-full resize-none bg-transparent font-mono text-[13px] leading-6 placeholder:text-muted-foreground/50 outline-none"
-          />
+          <div className="relative">
+            {slashOpen && (
+              <SlashMenu
+                commands={filteredSlashCommands}
+                selectedIndex={slashIndex}
+                onSelect={applySlashCommand}
+              />
+            )}
+            <textarea
+              ref={bodyRef}
+              value={body}
+              onChange={(e) => {
+                const next = e.target.value;
+                setBody(next);
+                setDirty(true);
+                updateSlashState(next, e.currentTarget.selectionStart);
+              }}
+              onKeyDown={onBodyKeyDown}
+              onClick={(e) => updateSlashState(body, e.currentTarget.selectionStart)}
+              onSelect={(e) => updateSlashState(body, e.currentTarget.selectionStart)}
+              spellCheck={false}
+              aria-label="Page content"
+              placeholder={bodyPlaceholder ?? "Enter text or type '/' for commands"}
+              className="mt-3 min-h-[40svh] w-full resize-none bg-transparent font-mono text-[13px] leading-6 placeholder:text-muted-foreground/50 outline-none"
+            />
+          </div>
 
           {belowBodySlot}
         </div>
@@ -370,6 +623,78 @@ function ToolBtn({
     >
       {children}
     </button>
+  );
+}
+
+function SlashMenu({
+  commands,
+  selectedIndex,
+  onSelect,
+}: {
+  commands: SlashCommand[];
+  selectedIndex: number;
+  onSelect: (command: SlashCommand) => void;
+}) {
+  if (commands.length === 0) {
+    return (
+      <div className="absolute left-0 top-3 z-30 w-80 rounded-md border bg-popover p-3 text-sm text-muted-foreground shadow-xl">
+        No blocks found.
+      </div>
+    );
+  }
+
+  let previousSection: SlashCommand["section"] | null = null;
+
+  return (
+    <div
+      role="listbox"
+      aria-label="Block commands"
+      className="absolute left-0 top-3 z-30 max-h-[30rem] w-[22rem] max-w-[min(22rem,calc(100vw-3rem))] overflow-y-auto rounded-md border bg-popover p-2 shadow-xl"
+    >
+      <div className="px-2 pb-1 text-[12px] italic text-muted-foreground">Type to filter</div>
+      {commands.map((command, index) => {
+        const showSection = command.section !== previousSection;
+        previousSection = command.section;
+
+        return (
+          <div key={command.id}>
+            {showSection && (
+              <div className="px-2 pb-1 pt-2 text-[11px] font-medium text-muted-foreground">
+                {command.section}
+              </div>
+            )}
+            <button
+              type="button"
+              role="option"
+              aria-selected={index === selectedIndex}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                onSelect(command);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded px-2 py-2 text-left",
+                index === selectedIndex ? "bg-muted text-foreground" : "hover:bg-muted/70",
+              )}
+            >
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded bg-muted text-muted-foreground">
+                {command.icon}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">{command.label}</span>
+                <span className="block truncate text-[11px] text-muted-foreground">
+                  {command.description}
+                </span>
+              </span>
+              {command.shortcut && (
+                <kbd className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                  {command.shortcut}
+                </kbd>
+              )}
+            </button>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

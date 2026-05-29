@@ -5,7 +5,16 @@ defmodule SymphoniaService.CodingAssistant.CuratedSummary do
 
   alias SymphoniaService.CodingAssistant.ValidationEvidence
 
-  def write!(repo_path, task, _run, files_changed, assistant_summary) do
+  def write!(
+        repo_path,
+        task,
+        _run,
+        files_changed,
+        assistant_summary,
+        validation_evidence \\ nil
+      ) do
+    validation_evidence = validation_evidence || ValidationEvidence.from_task(task)
+
     relative_path =
       Path.join([
         "symphonia",
@@ -18,13 +27,13 @@ defmodule SymphoniaService.CodingAssistant.CuratedSummary do
 
     File.write!(
       full_path,
-      body(task, files_changed, assistant_summary)
+      body(task, files_changed, assistant_summary, validation_evidence)
     )
 
     relative_path
   end
 
-  defp body(task, files_changed, assistant_summary) do
+  defp body(task, files_changed, assistant_summary, validation_evidence) do
     summary =
       assistant_summary
       |> to_string()
@@ -56,7 +65,7 @@ defmodule SymphoniaService.CodingAssistant.CuratedSummary do
 
     ## Validation Evidence
 
-    #{ValidationEvidence.markdown_list(ValidationEvidence.from_task(task))}
+    #{ValidationEvidence.markdown_list(validation_evidence)}
 
     ## Evidence Boundary
 

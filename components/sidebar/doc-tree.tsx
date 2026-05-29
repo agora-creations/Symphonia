@@ -1,9 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { ChevronRight, GitBranch } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  Archive,
+  ChevronRight,
+  FileText,
+  GitBranch,
+  MoreHorizontal,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import type {
   SpecArtifactStatus,
   SpecArtifactSummary,
@@ -11,6 +20,8 @@ import type {
   SpecWorkspacePayload,
   SpecWorkspaceSection,
 } from "@/lib/repository-model";
+import { useDocs, type DocPage } from "@/lib/docs-store";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -59,10 +70,36 @@ const SPEC_STATUS_LABELS: Record<SpecArtifactStatus, string> = {
  */
 export function DocTree({ repoKey }: Props) {
   const pathname = usePathname();
+  const router = useRouter();
   const slug = repoKey.toLowerCase();
+  const {
+    archivedForRepo,
+    archivePage,
+    createPage,
+    deletePage,
+    forRepo,
+    hydrated,
+    restorePage,
+  } = useDocs();
   const [specWorkspace, setSpecWorkspace] = useState<SpecWorkspacePayload | null>(null);
   const [specPending, setSpecPending] = useState<string | null>(null);
   const [specError, setSpecError] = useState<string | null>(null);
+  const [pagePending, setPagePending] = useState<string | null>(null);
+
+  const docPages = useMemo(
+    () =>
+      forRepo(repoKey)
+        .filter((page) => page.category === "doc")
+        .sort((a, b) => a.createdAt - b.createdAt),
+    [forRepo, repoKey],
+  );
+  const archivedDocPages = useMemo(
+    () =>
+      archivedForRepo(repoKey)
+        .filter((page) => page.category === "doc")
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    [archivedForRepo, repoKey],
+  );
 
   const loadSpecWorkspace = useCallback(async () => {
     const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace`, {
@@ -124,6 +161,51 @@ export function DocTree({ repoKey }: Props) {
     }
   };
 
+  const createUntitledPage = async (parentId?: string) => {
+    const pendingKey = `create:${parentId ?? "root"}`;
+    setPagePending(pendingKey);
+    try {
+      const page = await createPage(repoKey, "doc", {
+        title: "Untitled",
+        body: "",
+        parentId,
+      });
+      router.push(`/r/${slug}/docs/${encodeURIComponent(page.id)}`);
+    } finally {
+      setPagePending(null);
+    }
+  };
+
+  const archiveDocPage = async (page: DocPage) => {
+    setPagePending(`archive:${page.id}`);
+    try {
+      await archivePage(page.id);
+      if (pathname === `/r/${slug}/docs/${page.id}`) {
+        router.push(`/r/${slug}/docs`);
+      }
+    } finally {
+      setPagePending(null);
+    }
+  };
+
+  const restoreDocPage = async (page: DocPage) => {
+    setPagePending(`restore:${page.id}`);
+    try {
+      await restorePage(page.id);
+    } finally {
+      setPagePending(null);
+    }
+  };
+
+  const permanentlyDeleteDocPage = async (page: DocPage) => {
+    setPagePending(`delete:${page.id}`);
+    try {
+      await deletePage(page.id);
+    } finally {
+      setPagePending(null);
+    }
+  };
+
   return (
     <div className="space-y-3 text-[13px]">
       {/* Repository rules are pinned, not a section. */}
@@ -135,6 +217,19 @@ export function DocTree({ repoKey }: Props) {
         right={
           <span className="text-[10px] font-mono text-muted-foreground">root</span>
         }
+      />
+
+      <PageTreeSection
+        repoSlug={slug}
+        currentPath={pathname}
+        pages={docPages}
+        archivedPages={archivedDocPages}
+        hydrated={hydrated}
+        pending={pagePending}
+        onCreate={createUntitledPage}
+        onArchive={archiveDocPage}
+        onRestore={restoreDocPage}
+        onPermanentDelete={permanentlyDeleteDocPage}
       />
 
       {specError && (
@@ -177,6 +272,316 @@ export function DocTree({ repoKey }: Props) {
 
     </div>
   );
+}
+
+function PageTreeSection({
+  repoSlug,
+  currentPath,
+  pages,
+  archivedPages,
+  hydrated,
+  pending,
+  onCreate,
+  onArchive,
+  onRestore,
+  onPermanentDelete,
+}: {
+  repoSlug: string;
+  currentPath: string;
+  pages: DocPage[];
+  archivedPages: DocPage[];
+  hydrated: boolean;
+  pending: string | null;
+  onCreate: (parentId?: string) => Promise<void>;
+  onArchive: (page: DocPage) => Promise<void>;
+  onRestore: (page: DocPage) => Promise<void>;
+  onPermanentDelete: (page: DocPage) => Promise<void>;
+}) {
+  const { childrenByParent, rootPages } = useMemo(() => {
+    const ids = new Set(pages.map((page) => page.id));
+    const grouped = new Map<string, DocPage[]>();
+
+    for (const page of pages) {
+      const parentKey = page.parentId && ids.has(page.parentId) ? page.parentId : "root";
+      const children = grouped.get(parentKey) ?? [];
+      children.push(page);
+      grouped.set(parentKey, children);
+    }
+
+    for (const children of grouped.values()) {
+      children.sort((a, b) => a.createdAt - b.createdAt);
+    }
+
+    return {
+      childrenByParent: grouped,
+      rootPages: grouped.get("root") ?? [],
+    };
+  }, [pages]);
+
+  return (
+    <section className="space-y-1">
+      <div className="flex items-center justify-between gap-1 px-1.5">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          Pages
+        </span>
+        <div className="flex items-center gap-0.5">
+          <TrashMenu
+            pages={archivedPages}
+            pending={pending}
+            onRestore={onRestore}
+            onPermanentDelete={onPermanentDelete}
+          />
+          <button
+            type="button"
+            onClick={() => void onCreate()}
+            disabled={pending === "create:root"}
+            aria-label="New page"
+            title="New page"
+            className="grid h-6 w-6 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {!hydrated ? (
+        <div className="px-1.5 py-1 text-[12px] text-muted-foreground">Loading pages...</div>
+      ) : rootPages.length === 0 ? (
+        <button
+          type="button"
+          onClick={() => void onCreate()}
+          disabled={pending === "create:root"}
+          className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <FileText className="h-3.5 w-3.5" />
+          <span className="flex-1 truncate">Add a page</span>
+        </button>
+      ) : (
+        <ul className="space-y-0.5">
+          {rootPages.map((page) => (
+            <PageTreeNode
+              key={page.id}
+              page={page}
+              repoSlug={repoSlug}
+              currentPath={currentPath}
+              childrenByParent={childrenByParent}
+              pending={pending}
+              depth={0}
+              onCreate={onCreate}
+              onArchive={onArchive}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function PageTreeNode({
+  page,
+  repoSlug,
+  currentPath,
+  childrenByParent,
+  pending,
+  depth,
+  onCreate,
+  onArchive,
+}: {
+  page: DocPage;
+  repoSlug: string;
+  currentPath: string;
+  childrenByParent: Map<string, DocPage[]>;
+  pending: string | null;
+  depth: number;
+  onCreate: (parentId?: string) => Promise<void>;
+  onArchive: (page: DocPage) => Promise<void>;
+}) {
+  const href = pageHref(repoSlug, page);
+  const children = childrenByParent.get(page.id) ?? [];
+  const hasChildren = children.length > 0;
+  const active = currentPath === href;
+  const activeDescendant = hasActiveDescendant(children, childrenByParent, currentPath, repoSlug);
+  const [open, setOpen] = useState(activeDescendant);
+
+  useEffect(() => {
+    if (activeDescendant) setOpen(true);
+  }, [activeDescendant]);
+
+  return (
+    <li>
+      <div
+        className={cn(
+          "group flex items-center gap-0.5 rounded-md pr-1 transition-colors",
+          active
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+        )}
+        style={{ paddingLeft: `${depth * 12 + 2}px` }}
+      >
+        <button
+          type="button"
+          onClick={() => hasChildren && setOpen((value) => !value)}
+          disabled={!hasChildren}
+          aria-label={open ? "Collapse page" : "Expand page"}
+          className={cn(
+            "grid h-6 w-4 place-items-center rounded text-muted-foreground",
+            hasChildren ? "hover:text-foreground" : "opacity-0",
+          )}
+        >
+          <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
+        </button>
+        <Link href={href} className="flex min-w-0 flex-1 items-center gap-1.5 py-1">
+          <PageIcon page={page} />
+          <span className="truncate">
+            {page.title || <span className="italic text-muted-foreground/70">Untitled</span>}
+          </span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => void onCreate(page.id)}
+          disabled={pending === `create:${page.id}`}
+          aria-label={`Add page inside ${page.title || "Untitled"}`}
+          title="Add page inside"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-muted-foreground opacity-0 transition hover:bg-background/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-label={`Page actions for ${page.title || "Untitled"}`}
+              title="Page actions"
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-muted-foreground opacity-0 transition hover:bg-background/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-44 p-1">
+            <button
+              type="button"
+              onClick={() => void onArchive(page)}
+              disabled={pending === `archive:${page.id}`}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Archive className="h-3.5 w-3.5" />
+              Delete
+            </button>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {hasChildren && open && (
+        <ul className="mt-0.5 space-y-0.5">
+          {children.map((child) => (
+            <PageTreeNode
+              key={child.id}
+              page={child}
+              repoSlug={repoSlug}
+              currentPath={currentPath}
+              childrenByParent={childrenByParent}
+              pending={pending}
+              depth={depth + 1}
+              onCreate={onCreate}
+              onArchive={onArchive}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function TrashMenu({
+  pages,
+  pending,
+  onRestore,
+  onPermanentDelete,
+}: {
+  pages: DocPage[];
+  pending: string | null;
+  onRestore: (page: DocPage) => Promise<void>;
+  onPermanentDelete: (page: DocPage) => Promise<void>;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Open trash"
+          title="Trash"
+          className="flex h-6 items-center gap-1 rounded-[8px] px-1 text-[11px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          {pages.length > 0 && <span className="tabular-nums">{pages.length}</span>}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-2">
+        <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          Trash
+        </div>
+        {pages.length === 0 ? (
+          <p className="px-1 py-2 text-[12px] text-muted-foreground">Trash is empty.</p>
+        ) : (
+          <ul className="max-h-72 space-y-1 overflow-y-auto">
+            {pages.map((page) => (
+              <li key={page.id} className="rounded-md border bg-background/60 p-1.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <PageIcon page={page} />
+                  <span className="min-w-0 flex-1 truncate text-[12px]">
+                    {page.title || (
+                      <span className="italic text-muted-foreground/70">Untitled</span>
+                    )}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center justify-end gap-1">
+                  <button
+                    type="button"
+                    onClick={() => void onRestore(page)}
+                    disabled={pending === `restore:${page.id}`}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    Restore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onPermanentDelete(page)}
+                    disabled={pending === `delete:${page.id}`}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    Delete forever
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function PageIcon({ page }: { page: DocPage }) {
+  if (page.icon) return <span className="shrink-0 text-sm leading-none">{page.icon}</span>;
+  return <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
+}
+
+function pageHref(repoSlug: string, page: DocPage) {
+  return `/r/${repoSlug}/docs/${encodeURIComponent(page.id)}`;
+}
+
+function hasActiveDescendant(
+  pages: DocPage[],
+  childrenByParent: Map<string, DocPage[]>,
+  currentPath: string,
+  repoSlug: string,
+): boolean {
+  return pages.some((page) => {
+    if (currentPath === pageHref(repoSlug, page)) return true;
+    return hasActiveDescendant(childrenByParent.get(page.id) ?? [], childrenByParent, currentPath, repoSlug);
+  });
 }
 
 function SpecArtifactSection({

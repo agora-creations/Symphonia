@@ -9,6 +9,11 @@ import {
 } from "@/data/mock";
 import type { GitHubConnectionState, RepositoryAutomationState } from "@/lib/repository-model";
 import {
+  groupHarnessDecisions,
+  harnessStatusLabel,
+  type HarnessDecision,
+} from "@/lib/harness-ui-model";
+import {
   User as UserIcon,
   Bell,
   Bot,
@@ -25,6 +30,9 @@ import {
   Link2,
   ChevronRight,
   ChevronDown,
+  Pause,
+  Play,
+  RefreshCw,
 } from "lucide-react";
 
 type SectionId =
@@ -376,15 +384,6 @@ async function setAutomationEnabled(
   return payload.automation;
 }
 
-interface HarnessDecision {
-  at?: string;
-  repo?: string;
-  task?: string;
-  code: string;
-  dispatched?: boolean;
-  reason?: string;
-}
-
 interface HarnessProviderStatus {
   id: string;
   label: string;
@@ -397,8 +396,12 @@ interface HarnessProviderStatus {
 interface HarnessStatus {
   running: boolean;
   online?: boolean;
+  paused?: boolean;
   mode?: string;
   intervalMs?: number;
+  activeRuns?: number;
+  staleRuns?: number;
+  retryScheduled?: number;
   limits?: {
     maxClaimsPerTick?: number;
     maxClaimsPerRepo?: number;
@@ -414,6 +417,12 @@ interface HarnessStatus {
     repo?: string;
     task?: string;
     runId?: string;
+  } | null;
+  lastReconciliation?: {
+    at?: string;
+    reconciled?: number;
+    stale?: number;
+    message?: string;
   } | null;
   lastError?: {
     at?: string;
@@ -431,6 +440,16 @@ async function fetchHarnessStatus(): Promise<HarnessStatus> {
     throw new Error(payload.error ?? "Could not load Harness status");
   }
   return payload.harness;
+}
+
+async function postHarnessAction(action: "pause" | "resume" | "tick" | "reconcile"): Promise<HarnessStatus> {
+  const res = await fetch(`/api/harness/${action}`, { method: "POST", cache: "no-store" });
+  const payload = (await res.json()) as { harness?: HarnessStatus; error?: string } & HarnessStatus;
+  const harness = payload.harness ?? payload;
+  if (!res.ok || !harness) {
+    throw new Error(payload.error ?? "Could not update Harness");
+  }
+  return harness;
 }
 
 function AutomationIntegration({ repoKey }: { repoKey: string }) {
@@ -501,6 +520,7 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
 function HarnessPanel() {
   const [status, setStatus] = useState<HarnessStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<"pause" | "resume" | "tick" | "reconcile" | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -525,12 +545,24 @@ function HarnessPanel() {
     };
   }, []);
 
+  const runAction = async (action: "pause" | "resume" | "tick" | "reconcile") => {
+    setPendingAction(action);
+    setError(null);
+    try {
+      const nextStatus = await postHarnessAction(action);
+      setStatus(nextStatus);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update Harness");
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
   const providers = status?.providerReadiness?.providers ?? [];
   const runnableProvider = providers.find((provider) => provider.id === "codex_app_server");
-  const skipped = (status?.recentDecisions ?? [])
-    .filter((decision) => !decision.dispatched)
-    .slice(-4)
-    .reverse();
+  const decisionGroups = groupHarnessDecisions(status?.recentDecisions ?? []);
+  const statusLabel = harnessStatusLabel(error ? { lastError: { message: error } } : status);
+  const statusTone = error ? "warning" : status?.paused ? "neutral" : status?.online && status.running ? "ready" : "neutral";
 
   return (
     <div className="rounded-[10px] border bg-card shadow-[var(--elevation-card)]">
@@ -546,10 +578,7 @@ function HarnessPanel() {
             </div>
           </div>
         </div>
-        <StatusPill
-          tone={status?.online && status.running ? "ready" : error ? "warning" : "neutral"}
-          label={status?.online && status.running ? "Running" : error ? "Unavailable" : "Loading"}
-        />
+        <StatusPill tone={statusTone} label={statusLabel} />
       </div>
 
       <div className="border-t px-3 py-3">
@@ -566,8 +595,53 @@ function HarnessPanel() {
               label="Interval"
               value={status?.intervalMs ? `${Math.round(status.intervalMs / 1000)}s` : "Loading"}
             />
+            <HarnessMetric
+              label="Last reconcile"
+              value={formatShortDate(status?.lastReconciliation?.at) ?? "Not yet"}
+            />
           </div>
         )}
+      </div>
+
+      <div className="border-t px-3 py-3">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <HarnessMetric label="Active runs" value={String(status?.activeRuns ?? 0)} />
+          <HarnessMetric label="Stale runs" value={String(status?.staleRuns ?? 0)} />
+          <HarnessMetric label="Retries scheduled" value={String(status?.retryScheduled ?? 0)} />
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {status?.paused ? (
+            <HarnessActionButton
+              label="Resume Harness"
+              icon={<Play className="h-3.5 w-3.5" />}
+              pending={pendingAction === "resume"}
+              disabled={pendingAction != null}
+              onClick={() => runAction("resume")}
+            />
+          ) : (
+            <HarnessActionButton
+              label="Pause Harness"
+              icon={<Pause className="h-3.5 w-3.5" />}
+              pending={pendingAction === "pause"}
+              disabled={pendingAction != null}
+              onClick={() => runAction("pause")}
+            />
+          )}
+          <HarnessActionButton
+            label="Run check now"
+            icon={<RefreshCw className="h-3.5 w-3.5" />}
+            pending={pendingAction === "tick"}
+            disabled={pendingAction != null}
+            onClick={() => runAction("tick")}
+          />
+          <HarnessActionButton
+            label="Reconcile"
+            icon={<Activity className="h-3.5 w-3.5" />}
+            pending={pendingAction === "reconcile"}
+            disabled={pendingAction != null}
+            onClick={() => runAction("reconcile")}
+          />
+        </div>
       </div>
 
       <div className="border-t px-3 py-3">
@@ -637,26 +711,77 @@ function HarnessPanel() {
 
       <div className="border-t px-3 py-3">
         <div className="mb-2 text-[11px] font-medium uppercase text-muted-foreground">
-          Recent skipped reasons
+          Recent decisions
         </div>
-        {skipped.length > 0 ? (
-          <ul className="space-y-2">
-            {skipped.map((decision, index) => (
-              <li key={`${decision.at ?? "decision"}-${decision.task ?? index}`} className="text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-foreground">{decision.task ?? decision.repo}</span>
-                  <span className="text-muted-foreground">{decision.code}</span>
-                </div>
-                {decision.reason && (
-                  <div className="mt-0.5 text-muted-foreground">{decision.reason}</div>
-                )}
-              </li>
-            ))}
-          </ul>
+        {(status?.recentDecisions ?? []).length > 0 ? (
+          <div className="space-y-3">
+            <HarnessDecisionGroup label="Dispatched" decisions={decisionGroups.dispatch} />
+            <HarnessDecisionGroup label="Skipped" decisions={decisionGroups.skip} />
+            <HarnessDecisionGroup label="Errored" decisions={decisionGroups.error} />
+            <HarnessDecisionGroup label="Reconciled" decisions={decisionGroups.reconcile} />
+            <HarnessDecisionGroup label="Retried" decisions={decisionGroups.retry} />
+            <HarnessDecisionGroup label="Paused" decisions={decisionGroups.pause} />
+          </div>
         ) : (
-          <div className="text-xs text-muted-foreground">No skipped daemon decisions yet.</div>
+          <div className="text-xs text-muted-foreground">No Harness decisions yet.</div>
         )}
       </div>
+    </div>
+  );
+}
+
+function HarnessActionButton({
+  label,
+  icon,
+  pending,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  pending: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1 text-xs transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {icon}
+      {pending ? "Working..." : label}
+    </button>
+  );
+}
+
+function HarnessDecisionGroup({
+  label,
+  decisions,
+}: {
+  label: string;
+  decisions: HarnessDecision[];
+}) {
+  const visible = decisions.slice(-3).reverse();
+  if (visible.length === 0) return null;
+
+  return (
+    <div>
+      <div className="mb-1 text-[10px] font-medium uppercase text-muted-foreground">{label}</div>
+      <ul className="space-y-2">
+        {visible.map((decision, index) => (
+          <li key={`${label}-${decision.at ?? "decision"}-${decision.task ?? index}`} className="text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-foreground">{decision.task ?? decision.repo ?? "Harness"}</span>
+              <span className="text-muted-foreground">{decision.code}</span>
+            </div>
+            {decision.reason && (
+              <div className="mt-0.5 text-muted-foreground">{decision.reason}</div>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -85,6 +85,37 @@ export interface SpecWorkspacePayload {
   sections: SpecWorkspaceSection[];
 }
 
+export interface MarkdownPage {
+  type: "page";
+  id: string;
+  title: string;
+  body: string;
+  path: string;
+  parentId?: string;
+  icon?: string;
+  cover?: string;
+  isArchived: boolean;
+  isPublished: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  metadata: Record<string, unknown> & {
+    type: "page";
+    id: string;
+    title?: string;
+    parent_id?: string;
+    icon?: string;
+    cover?: string;
+    archived?: boolean;
+    published?: boolean;
+    created_at?: string;
+    updated_at?: string;
+  };
+}
+
+export interface MarkdownPagesPayload {
+  pages: MarkdownPage[];
+}
+
 export interface RepositorySummary {
   key: string;
   name: string;

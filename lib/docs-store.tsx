@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { MarkdownPage } from "@/lib/repository-model";
 
 /**
  * Notion-like document store for Symphonía.
@@ -51,6 +52,8 @@ export interface DocPage {
   icon?: string; // emoji
   cover?: string; // gradient id
   parentId?: string;
+  archived?: boolean;
+  published?: boolean;
   /** Free-form linked sources for tasks (URLs, issue refs). */
   links?: string[];
   /** Task-specific metadata, opaque to the editor. */
@@ -258,6 +261,7 @@ interface DocsState {
   byId: (id: string) => DocPage | undefined;
   byPath: (repo: string, path: string) => DocPage | undefined;
   forRepo: (repo: string) => DocPage[];
+  archivedForRepo: (repo: string) => DocPage[];
   /** Open a fresh draft for a category (used by "New …" actions). */
   newDraft: (
     repo: string,
@@ -269,36 +273,57 @@ interface DocsState {
     repo: string,
     category: DocCategory,
     init: Partial<Pick<DocPage, "title" | "body" | "icon" | "parentId" | "links" | "meta">>,
-  ) => DocPage;
+  ) => Promise<DocPage>;
   updateDraft: (id: string, patch: Partial<DocPage>) => void;
-  saveDraft: (id: string) => DocPage | undefined;
+  saveDraft: (
+    id: string,
+    patch?: Partial<Pick<DocPage, "title" | "body" | "icon" | "cover" | "published">>,
+  ) => Promise<DocPage | undefined>;
   discardDraft: (id: string) => void;
   updatePage: (id: string, patch: Partial<DocPage>) => void;
+  archivePage: (id: string) => Promise<void>;
+  restorePage: (id: string) => Promise<void>;
+  deletePage: (id: string) => Promise<void>;
   ensureWorkflow: (repo: string) => DocPage;
 }
 
 const Ctx = createContext<DocsState | null>(null);
 
-export function DocsProvider({ children }: { children: ReactNode }) {
+export function DocsProvider({ children, repoKey }: { children: ReactNode; repoKey?: string }) {
   const [pages, setPages] = useState<DocPage[]>([]);
   const [drafts, setDrafts] = useState<DocPage[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
-  // Hydrate from localStorage once on the client.
+  // Hydrate from localStorage, then replace doc pages with the repo-backed API
+  // when the local service is available.
   useEffect(() => {
-    try {
-      const raw = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
-      if (raw) {
-        const parsed = JSON.parse(raw) as DocPage[];
-        setPages(parsed);
-      } else {
-        setPages(buildSeed());
+    let cancelled = false;
+
+    async function load() {
+      setHydrated(false);
+      const localPages = loadLocalPages();
+      if (cancelled) return;
+      setPages(localPages);
+
+      if (repoKey) {
+        try {
+          const servicePages = await fetchMarkdownPages(repoKey, { includeArchived: true });
+          if (!cancelled) {
+            setPages((current) => mergeServiceDocPages(current, repoKey, servicePages, true));
+          }
+        } catch {
+          // Keep local pages when the Elixir service is unavailable.
+        }
       }
-    } catch {
-      setPages(buildSeed());
+
+      if (!cancelled) setHydrated(true);
     }
-    setHydrated(true);
-  }, []);
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [repoKey]);
 
   // Persist on change.
   useEffect(() => {
@@ -315,10 +340,18 @@ export function DocsProvider({ children }: { children: ReactNode }) {
     [pages, drafts],
   );
   const byPath = useCallback(
-    (repo: string, path: string) => pages.find((p) => p.repo === repo && p.path === path),
+    (repo: string, path: string) =>
+      pages.find((p) => p.repo === repo && p.path === path && !p.archived),
     [pages],
   );
-  const forRepo = useCallback((repo: string) => pages.filter((p) => p.repo === repo), [pages]);
+  const forRepo = useCallback(
+    (repo: string) => pages.filter((p) => p.repo === repo && !p.archived),
+    [pages],
+  );
+  const archivedForRepo = useCallback(
+    (repo: string) => pages.filter((p) => p.repo === repo && p.archived),
+    [pages],
+  );
 
   const newDraft = useCallback<DocsState["newDraft"]>((repo, category, init) => {
     const now = Date.now();
@@ -340,25 +373,39 @@ export function DocsProvider({ children }: { children: ReactNode }) {
     return draft;
   }, []);
 
-  const createPage: DocsState["createPage"] = useCallback((repo, category, init) => {
-    const now = Date.now();
-    const page: DocPage = {
-      id: uid("page"),
-      repo,
-      category,
-      path: pathFor(category, slugify(init.title ?? "untitled")),
-      title: init.title ?? "",
-      body: init.body ?? "",
-      icon: init.icon,
-      parentId: init.parentId,
-      links: init.links,
-      meta: init.meta,
-      createdAt: now,
-      updatedAt: now,
-    };
-    setPages((p) => [...p, page]);
-    return page;
-  }, []);
+  const createPage: DocsState["createPage"] = useCallback(
+    async (repo, category, init) => {
+      const now = Date.now();
+      const page: DocPage = {
+        id: uid("page"),
+        repo,
+        category,
+        path: pathFor(category, slugify(init.title ?? "untitled")),
+        title: init.title ?? "",
+        body: init.body ?? "",
+        icon: init.icon,
+        parentId: init.parentId,
+        links: init.links,
+        meta: init.meta,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      if (repoKey && repo === repoKey && category === "doc") {
+        try {
+          const saved = await createServiceDocPage(repoKey, page);
+          setPages((p) => mergeServiceDocPages(p, repoKey, [saved]));
+          return saved;
+        } catch {
+          // Fall through to local creation so the UI remains usable offline.
+        }
+      }
+
+      setPages((p) => [...p, page]);
+      return page;
+    },
+    [repoKey],
+  );
 
   const updateDraft: DocsState["updateDraft"] = useCallback((id, patch) => {
     setDrafts((d) =>
@@ -366,32 +413,120 @@ export function DocsProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const saveDraft: DocsState["saveDraft"] = useCallback((id) => {
-    let saved: DocPage | undefined;
-    setDrafts((d) => {
-      const found = d.find((p) => p.id === id);
-      if (!found) return d;
-      // Re-derive a stable path from the final title at save time.
-      const path = pathFor(found.category, slugify(found.title || "untitled"));
-      saved = { ...found, path, updatedAt: Date.now() };
-      return d.filter((p) => p.id !== id);
-    });
-    if (saved) setPages((p) => [...p, saved!]);
-    return saved;
-  }, []);
+  const saveDraft: DocsState["saveDraft"] = useCallback(
+    async (id, patch) => {
+      const found = drafts.find((p) => p.id === id);
+      if (!found) return undefined;
+      const latest = { ...found, ...patch, updatedAt: Date.now() };
+
+      if (repoKey && latest.category === "doc") {
+        try {
+          const saved = await createServiceDocPage(repoKey, latest);
+          setDrafts((d) => d.filter((p) => p.id !== id));
+          setPages((p) => mergeServiceDocPages(p, repoKey, [saved]));
+          return saved;
+        } catch {
+          // Fall through to local save so drafting remains usable without the service.
+        }
+      }
+
+      const path = pathFor(latest.category, slugify(latest.title || "untitled"));
+      const saved = { ...latest, path, updatedAt: Date.now() };
+      setDrafts((d) => d.filter((p) => p.id !== id));
+      setPages((p) => [...p, saved]);
+      return saved;
+    },
+    [drafts, repoKey],
+  );
 
   const discardDraft: DocsState["discardDraft"] = useCallback((id) => {
     setDrafts((d) => d.filter((p) => p.id !== id));
   }, []);
 
-  const updatePage: DocsState["updatePage"] = useCallback((id, patch) => {
-    setPages((p) =>
-      p.map((page) => (page.id === id ? { ...page, ...patch, updatedAt: Date.now() } : page)),
-    );
-    setDrafts((d) =>
-      d.map((page) => (page.id === id ? { ...page, ...patch, updatedAt: Date.now() } : page)),
-    );
-  }, []);
+  const updatePage: DocsState["updatePage"] = useCallback(
+    (id, patch) => {
+      const existing = pages.find((page) => page.id === id);
+      setPages((p) =>
+        p.map((page) => (page.id === id ? { ...page, ...patch, updatedAt: Date.now() } : page)),
+      );
+      setDrafts((d) =>
+        d.map((page) => (page.id === id ? { ...page, ...patch, updatedAt: Date.now() } : page)),
+      );
+
+      if (repoKey && existing?.category === "doc") {
+        const optimistic = { ...existing, ...patch, updatedAt: Date.now() };
+        void updateServiceDocPage(repoKey, optimistic).then((saved) => {
+          setPages((current) =>
+            current.map((page) => (page.id === saved.id ? saved : page)),
+          );
+        }).catch(() => {
+          /* local state remains the offline fallback */
+        });
+      }
+    },
+    [pages, repoKey],
+  );
+
+  const archivePage: DocsState["archivePage"] = useCallback(
+    async (id) => {
+      const existing = pages.find((page) => page.id === id);
+      if (!existing) return;
+      setPages((current) =>
+        current.map((page) =>
+          page.id === id ? { ...page, archived: true, updatedAt: Date.now() } : page,
+        ),
+      );
+
+      if (repoKey && existing.repo === repoKey && existing.category === "doc") {
+        try {
+          const saved = await archiveServiceDocPage(repoKey, id);
+          setPages((current) => current.map((page) => (page.id === saved.id ? saved : page)));
+        } catch {
+          /* local state remains the offline fallback */
+        }
+      }
+    },
+    [pages, repoKey],
+  );
+
+  const restorePage: DocsState["restorePage"] = useCallback(
+    async (id) => {
+      const existing = pages.find((page) => page.id === id);
+      if (!existing) return;
+      setPages((current) =>
+        current.map((page) =>
+          page.id === id ? { ...page, archived: false, updatedAt: Date.now() } : page,
+        ),
+      );
+
+      if (repoKey && existing.repo === repoKey && existing.category === "doc") {
+        try {
+          const saved = await updateServiceDocPage(repoKey, { ...existing, archived: false });
+          setPages((current) => current.map((page) => (page.id === saved.id ? saved : page)));
+        } catch {
+          /* local state remains the offline fallback */
+        }
+      }
+    },
+    [pages, repoKey],
+  );
+
+  const deletePage: DocsState["deletePage"] = useCallback(
+    async (id) => {
+      const existing = pages.find((page) => page.id === id);
+      if (!existing) return;
+      setPages((current) => current.filter((page) => page.id !== id));
+
+      if (repoKey && existing.repo === repoKey && existing.category === "doc") {
+        try {
+          await deleteServiceDocPage(repoKey, id);
+        } catch {
+          /* local state remains the offline fallback */
+        }
+      }
+    },
+    [pages, repoKey],
+  );
 
   const ensureWorkflow: DocsState["ensureWorkflow"] = useCallback(
     (repo) => {
@@ -423,12 +558,16 @@ export function DocsProvider({ children }: { children: ReactNode }) {
       byId,
       byPath,
       forRepo,
+      archivedForRepo,
       newDraft,
       createPage,
       updateDraft,
       saveDraft,
       discardDraft,
       updatePage,
+      archivePage,
+      restorePage,
+      deletePage,
       ensureWorkflow,
     }),
     [
@@ -438,12 +577,16 @@ export function DocsProvider({ children }: { children: ReactNode }) {
       byId,
       byPath,
       forRepo,
+      archivedForRepo,
       newDraft,
       createPage,
       updateDraft,
       saveDraft,
       discardDraft,
       updatePage,
+      archivePage,
+      restorePage,
+      deletePage,
       ensureWorkflow,
     ],
   );
@@ -458,3 +601,133 @@ export function useDocs(): DocsState {
 }
 
 export { pathFor, slugify };
+
+function loadLocalPages(): DocPage[] {
+  try {
+    const raw = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
+    if (raw) return JSON.parse(raw) as DocPage[];
+  } catch {
+    /* ignore malformed local cache */
+  }
+  return buildSeed();
+}
+
+async function fetchMarkdownPages(
+  repoKey: string,
+  opts: { includeArchived?: boolean } = {},
+): Promise<DocPage[]> {
+  const query = opts.includeArchived ? "?includeArchived=true" : "";
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/pages${query}`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as { pages?: MarkdownPage[]; error?: string };
+  if (!res.ok || !payload.pages) {
+    throw new Error(payload.error ?? "Could not load pages");
+  }
+  return payload.pages.map((page) => fromServicePage(repoKey, page));
+}
+
+async function createServiceDocPage(repoKey: string, draft: DocPage): Promise<DocPage> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/pages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(toServicePayload(draft)),
+  });
+  const payload = (await res.json()) as { page?: MarkdownPage; error?: string };
+  if (!res.ok || !payload.page) {
+    throw new Error(payload.error ?? "Could not save page");
+  }
+  return fromServicePage(repoKey, payload.page);
+}
+
+async function updateServiceDocPage(repoKey: string, page: DocPage): Promise<DocPage> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/pages/${encodeURIComponent(page.id)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(toServicePayload(page)),
+    },
+  );
+  const payload = (await res.json()) as { page?: MarkdownPage; error?: string };
+  if (!res.ok || !payload.page) {
+    throw new Error(payload.error ?? "Could not update page");
+  }
+  return fromServicePage(repoKey, payload.page);
+}
+
+async function archiveServiceDocPage(repoKey: string, id: string): Promise<DocPage> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/pages/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+  const payload = (await res.json()) as { page?: MarkdownPage; error?: string };
+  if (!res.ok || !payload.page) {
+    throw new Error(payload.error ?? "Could not archive page");
+  }
+  return fromServicePage(repoKey, payload.page);
+}
+
+async function deleteServiceDocPage(repoKey: string, id: string): Promise<void> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/pages/${encodeURIComponent(
+      id,
+    )}?permanent=true`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error ?? "Could not delete page");
+  }
+}
+
+function mergeServiceDocPages(
+  current: DocPage[],
+  repoKey: string,
+  servicePages: DocPage[],
+  replaceRepoDocs = false,
+) {
+  const serviceIds = new Set(servicePages.map((page) => page.id));
+  const kept = current.filter((page) => {
+    if (page.repo !== repoKey || page.category !== "doc") return true;
+    if (replaceRepoDocs) return false;
+    return !serviceIds.has(page.id);
+  });
+  return [...kept, ...servicePages].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function fromServicePage(repoKey: string, page: MarkdownPage): DocPage {
+  return {
+    id: page.id,
+    repo: repoKey,
+    category: "doc",
+    path: page.path,
+    title: page.title,
+    body: page.body,
+    icon: page.icon,
+    cover: page.cover,
+    parentId: page.parentId,
+    archived: page.isArchived,
+    published: page.isPublished,
+    createdAt: timestamp(page.createdAt),
+    updatedAt: timestamp(page.updatedAt),
+  };
+}
+
+function toServicePayload(page: DocPage) {
+  return {
+    title: page.title || "Untitled",
+    body: page.body,
+    parentId: page.parentId,
+    icon: page.icon,
+    cover: page.cover,
+    isArchived: page.archived,
+    isPublished: page.published,
+  };
+}
+
+function timestamp(value?: string): number {
+  if (!value) return Date.now();
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}

@@ -7,6 +7,7 @@ defmodule SymphoniaService.HTTPServer do
 
   alias SymphoniaService.{
     CodingAssistant,
+    MarkdownPages,
     RepositoryRegistry,
     SpecWorkspace,
     TaskStore,
@@ -112,6 +113,23 @@ defmodule SymphoniaService.HTTPServer do
 
         {200,
          %{"repo" => repository["key"], "specWorkspace" => spec_workspace_payload(repository)}}
+
+      ["api", "repositories", repo, "pages"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        params = query_params(path)
+        include_archived? = Map.get(params, "includeArchived") == "true"
+
+        {200,
+         %{
+           "repo" => repository["key"],
+           "pages" => MarkdownPages.list_pages(repository, include_archived: include_archived?)
+         }}
+
+      ["api", "repositories", repo, "pages", page_id] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        {200,
+         %{"repo" => repository["key"], "page" => MarkdownPages.read_page(repository, page_id)}}
 
       ["api", "repositories", repo, "spec-workspace", "artifacts"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -231,6 +249,11 @@ defmodule SymphoniaService.HTTPServer do
         workflow = Workspace.update_workflow(repository, Map.get(payload, "body", ""))
         {200, %{"repo" => repository["key"], "workflow" => workflow}}
 
+      ["api", "repositories", repo, "pages", page_id] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        page = MarkdownPages.update_page(repository, page_id, decode_json(body))
+        {200, %{"repo" => repository["key"], "page" => page}}
+
       ["api", "repositories", repo, "spec-workspace", "artifacts", type, id] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         artifact = SpecWorkspace.update_artifact(repository, type, id, decode_json(body))
@@ -254,6 +277,24 @@ defmodule SymphoniaService.HTTPServer do
       ["api", "repositories", repo] ->
         repository = RepositoryRegistry.remove(registry_path, repo)
         {200, %{"repository" => public_repository(repository)}}
+
+      ["api", "repositories", repo, "pages", page_id] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        params = query_params(path)
+
+        if Map.get(params, "permanent") == "true" do
+          {200,
+           %{
+             "repo" => repository["key"],
+             "page" => MarkdownPages.delete_page(repository, page_id)
+           }}
+        else
+          {200,
+           %{
+             "repo" => repository["key"],
+             "page" => MarkdownPages.archive_page(repository, page_id)
+           }}
+        end
 
       _ ->
         {404, %{"error" => "Not found"}}
@@ -347,6 +388,11 @@ defmodule SymphoniaService.HTTPServer do
         artifact = SpecWorkspace.create_task_brief(repository, decode_json(body))
         {201, %{"artifact" => artifact}}
 
+      ["api", "repositories", repo, "pages"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        page = MarkdownPages.create_page(repository, decode_json(body))
+        {201, %{"repo" => repository["key"], "page" => page}}
+
       ["api", "repositories", repo, "clarise", "extract"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, ArtifactExtractor.extract(repository, decode_json(body))}
@@ -401,6 +447,22 @@ defmodule SymphoniaService.HTTPServer do
       ["api", "harness", "daemon", "tick"] ->
         Daemon.ensure_started(registry_path)
         {200, Daemon.tick()}
+
+      ["api", "harness", "pause"] ->
+        Daemon.ensure_started(registry_path)
+        {200, Daemon.pause()}
+
+      ["api", "harness", "resume"] ->
+        Daemon.ensure_started(registry_path)
+        {200, Daemon.resume()}
+
+      ["api", "harness", "tick"] ->
+        Daemon.ensure_started(registry_path)
+        {200, Daemon.tick()}
+
+      ["api", "harness", "reconcile"] ->
+        Daemon.ensure_started(registry_path)
+        {200, Daemon.reconcile()}
 
       ["api", "repositories", repo, "workflow", "from-template"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)

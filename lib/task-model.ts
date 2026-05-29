@@ -73,6 +73,10 @@ export interface CodingAssistantRun {
   eligibilityReason?: string;
   reviewBranch?: string;
   curatedSummaryPath?: string;
+  retryAt?: string;
+  failureClass?: string;
+  attempt?: number;
+  maxAttempts?: number;
   timeline?: CodingAssistantRunEvent[];
   startedAt?: string;
   completedAt?: string;

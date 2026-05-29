@@ -31,6 +31,8 @@ import {
   reviewGateLabel,
   reviewGateState,
   reviewGateTone,
+  taskOperationalBadge,
+  validationBadgeForTask,
 } from "@/lib/harness-ui-model";
 import type { RepositoryAutomationState } from "@/lib/repository-model";
 import {
@@ -205,6 +207,8 @@ function TaskCard({
   const runBadge = compactRunBadge(task.run);
   const gateState = reviewGateState(task);
   const showReviewGate = gateState !== "not_reviewable";
+  const operationalBadge = taskOperationalBadge(task);
+  const validationBadge = validationBadgeForTask(task);
   return (
     <article className="rounded-[10px] border bg-card p-2.5 text-card-foreground shadow-[var(--elevation-card)] transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-[var(--elevation-card-hover)]">
       <Link href={`/r/${repoSlug}/tasks/${encodeURIComponent(task.key)}`} className="block">
@@ -227,6 +231,27 @@ function TaskCard({
               )}
             >
               {reviewGateLabel(task)}
+            </span>
+          )}
+          {operationalBadge && (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px]",
+                runBadgeToneClass(operationalBadge.tone),
+              )}
+              title={operationalBadge.reason}
+            >
+              {operationalBadge.label}
+            </span>
+          )}
+          {validationBadge && validationBadge.label !== operationalBadge?.label && (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px]",
+                runBadgeToneClass(validationBadge.tone),
+              )}
+            >
+              {validationBadge.label}
             </span>
           )}
           {runBadge && (
@@ -293,6 +318,8 @@ function TaskRow({
   const runBadge = compactRunBadge(task.run);
   const gateState = reviewGateState(task);
   const showReviewGate = gateState !== "not_reviewable";
+  const operationalBadge = taskOperationalBadge(task);
+  const validationBadge = validationBadgeForTask(task);
   return (
     <div className="grid grid-cols-[1.5rem_4.5rem_1fr_auto] items-center gap-3 border-b px-4 py-2 last:border-b-0 hover:bg-accent">
       <Link
@@ -320,6 +347,27 @@ function TaskRow({
             )}
           >
             {reviewGateLabel(task)}
+          </span>
+        )}
+        {operationalBadge && (
+          <span
+            className={cn(
+              "hidden md:inline-flex rounded-full border px-1.5 py-0.5 text-[10px]",
+              runBadgeToneClass(operationalBadge.tone),
+            )}
+            title={operationalBadge.reason}
+          >
+            {operationalBadge.label}
+          </span>
+        )}
+        {validationBadge && validationBadge.label !== operationalBadge?.label && (
+          <span
+            className={cn(
+              "hidden md:inline-flex rounded-full border px-1.5 py-0.5 text-[10px]",
+              runBadgeToneClass(validationBadge.tone),
+            )}
+          >
+            {validationBadge.label}
           </span>
         )}
         {runBadge && (

@@ -13,6 +13,33 @@ export interface HarnessStatusBadge {
   tone: "ready" | "warning" | "neutral";
 }
 
+export type HarnessDecisionKind =
+  | "dispatch"
+  | "skip"
+  | "error"
+  | "reconcile"
+  | "retry"
+  | "pause";
+
+export interface HarnessDecision {
+  at?: string;
+  repo?: string;
+  task?: string;
+  code: string;
+  kind?: HarnessDecisionKind;
+  dispatched?: boolean;
+  reason?: string;
+  runId?: string;
+}
+
+export interface HarnessStatusLike {
+  running?: boolean;
+  online?: boolean;
+  paused?: boolean;
+  lastError?: { message?: string } | null;
+  recentDecisions?: HarnessDecision[];
+}
+
 export interface CompactRunBadge {
   label: "Working" | "Checking changes" | "Ready for review" | "Failed" | "Canceled";
   tone: "neutral" | "ready" | "warning";
@@ -37,6 +64,13 @@ export type ReviewGateState =
   | "changes_requested"
   | "not_reviewable";
 
+export type ValidationSummaryState =
+  | "passed"
+  | "failed"
+  | "missing"
+  | "not_run"
+  | "unknown";
+
 export function automationLabel(automation?: RepositoryAutomationState | null): string {
   return automation?.enabled ? "Automation on" : "Automation off";
 }
@@ -47,6 +81,36 @@ export function harnessLabel(automation?: RepositoryAutomationState | null): str
 
 export function daemonLabel(daemon?: { running?: boolean } | null): string {
   return daemon?.running ? "Background service: Active" : "Background service: Stopped";
+}
+
+export function harnessStatusLabel(status?: HarnessStatusLike | null): string {
+  if (!status) return "Loading";
+  if (status.lastError?.message) return "Error";
+  if (status.paused) return "Paused";
+  if (status.online && status.running) return "Running";
+  return "Unavailable";
+}
+
+export function groupHarnessDecisions(
+  decisions: HarnessDecision[] = [],
+): Record<HarnessDecisionKind, HarnessDecision[]> {
+  const groups: Record<HarnessDecisionKind, HarnessDecision[]> = {
+    dispatch: [],
+    skip: [],
+    error: [],
+    reconcile: [],
+    retry: [],
+    pause: [],
+  };
+
+  for (const decision of decisions) {
+    const kind = decision.kind ?? (decision.dispatched ? "dispatch" : "skip");
+    if (kind in groups) {
+      groups[kind as HarnessDecisionKind].push(decision);
+    }
+  }
+
+  return groups;
 }
 
 export function isActiveRun(run?: CodingAssistantRun | null): boolean {
@@ -203,6 +267,84 @@ export function prStateLabel(task: ServiceTask): string | undefined {
   }
 }
 
+export function validationSummaryState(task: ServiceTask): ValidationSummaryState {
+  if (!task.handoff) return "unknown";
+
+  const evidence = task.handoff.validationEvidence ?? [];
+  if (evidence.length === 0) return "missing";
+  if (evidence.some((item) => item.status === "failed")) return "failed";
+  if (evidence.every((item) => item.status === "passed")) return "passed";
+  if (evidence.some((item) => item.status === "not_run")) return "not_run";
+  return "unknown";
+}
+
+export function validationSummaryLabel(task: ServiceTask): string {
+  switch (validationSummaryState(task)) {
+    case "passed":
+      return "Validation passed";
+    case "failed":
+      return "Validation failed";
+    case "missing":
+    case "not_run":
+      return "Validation missing";
+    case "unknown":
+      return "Validation unknown";
+  }
+}
+
+export function hasFailedRequiredValidation(task: ServiceTask): boolean {
+  return validationSummaryState(task) === "failed";
+}
+
+export function validationBadgeForTask(
+  task: ServiceTask,
+): { label: string; tone: "ready" | "warning" | "neutral" } | null {
+  const state = validationSummaryState(task);
+
+  if (state === "failed") {
+    return { label: "Validation failed", tone: "warning" };
+  }
+
+  if (task.status === "in_review" && (state === "missing" || state === "not_run")) {
+    return { label: "Validation missing", tone: "neutral" };
+  }
+
+  return null;
+}
+
+export function taskOperationalBadge(
+  task: ServiceTask,
+  harnessStatus?: HarnessStatusLike | null,
+): { label: string; tone: "ready" | "warning" | "neutral"; reason?: string } | null {
+  const explanation = task.pausedExplanation ?? task.run?.message ?? "";
+
+  if (task.pausedReason === "blocked_by_setup") {
+    return { label: "Setup blocked", tone: "warning", reason: task.pausedExplanation };
+  }
+
+  if (/stopped updating|stale|too long|workspace is missing/i.test(explanation)) {
+    return { label: "Run stale", tone: "warning", reason: task.pausedExplanation };
+  }
+
+  if (task.pausedReason === "waiting_for_sync" && task.run?.retryAt) {
+    return { label: "Retry scheduled", tone: "neutral", reason: task.run.retryAt };
+  }
+
+  if (/no reviewable files|did not produce any files/i.test(explanation)) {
+    return { label: "No reviewable files", tone: "warning", reason: task.pausedExplanation };
+  }
+
+  if (validationSummaryState(task) === "failed") {
+    return { label: "Validation failed", tone: "warning" };
+  }
+
+  if (harnessStatus?.paused && task.status === "todo") {
+    return { label: "Automation paused", tone: "neutral" };
+  }
+
+  return null;
+}
+
 export function harnessStatusForTask(
   task: ServiceTask,
   eligibility?: TaskEligibilityExplanation,
@@ -224,13 +366,14 @@ export function harnessStatusForTask(
   }
 
   if (task.status === "paused") {
+    const waitingForRetry = task.pausedReason === "waiting_for_sync" && task.run?.retryAt;
     const blocked =
       task.pausedReason === "run_failed" || task.pausedReason === "blocked_by_setup";
 
     return {
-      label: blocked ? "Blocked" : "Paused",
+      label: waitingForRetry ? "Retry scheduled" : blocked ? "Blocked" : "Paused",
       reason: task.pausedExplanation,
-      tone: "warning",
+      tone: blocked ? "warning" : "neutral",
     };
   }
 

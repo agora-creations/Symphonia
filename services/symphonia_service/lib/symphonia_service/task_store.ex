@@ -458,6 +458,10 @@ defmodule SymphoniaService.TaskStore do
       "eligibilityReason" => run["eligibility_reason"],
       "reviewBranch" => run["review_branch"],
       "curatedSummaryPath" => run["curated_summary_path"],
+      "retryAt" => run["retry_at"],
+      "failureClass" => run["failure_class"],
+      "attempt" => run["attempt"],
+      "maxAttempts" => run["max_attempts"],
       "startedAt" => run["started_at"],
       "completedAt" => run["completed_at"]
     }

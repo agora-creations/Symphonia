@@ -149,6 +149,10 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "eligibilityReason" => run["eligibility_reason"],
       "reviewBranch" => run["review_branch"],
       "curatedSummaryPath" => run["curated_summary_path"],
+      "retryAt" => run["retry_at"],
+      "failureClass" => run["failure_class"],
+      "attempt" => run["attempt"],
+      "maxAttempts" => run["max_attempts"],
       "timeline" => public_events(run),
       "startedAt" => run["started_at"],
       "completedAt" => run["completed_at"]
@@ -264,7 +268,12 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "turn_id",
       "eligibility_reason",
       "review_branch",
-      "curated_summary_path"
+      "curated_summary_path",
+      "failure_class",
+      "retry_at",
+      "retry_of",
+      "retry_reason",
+      "retry_dispatched_at"
     ])
   end
 

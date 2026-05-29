@@ -482,6 +482,23 @@ defmodule SymphoniaService.CodingAssistantTest do
 
     assert harness_status["harness"]["mode"] == "local_service"
     assert harness_status["harness"]["limits"]["maxConcurrentRuns"] == 1
+    assert Map.has_key?(harness_status["harness"], "paused")
+    assert Map.has_key?(harness_status["harness"], "activeRuns")
+
+    {200, paused_harness} = http_json(:post, "http://127.0.0.1:#{port}/api/harness/pause", %{})
+    assert paused_harness["paused"] == true
+
+    {200, paused_tick} = http_json(:post, "http://127.0.0.1:#{port}/api/harness/tick", %{})
+    assert paused_tick["paused"] == true
+    assert Enum.any?(paused_tick["decisions"], &(&1["code"] == "harness_paused"))
+
+    {200, resumed_harness} = http_json(:post, "http://127.0.0.1:#{port}/api/harness/resume", %{})
+    assert resumed_harness["paused"] == false
+
+    {200, reconciled_harness} =
+      http_json(:post, "http://127.0.0.1:#{port}/api/harness/reconcile", %{})
+
+    assert reconciled_harness["lastReconciliation"]["at"]
 
     {200, canceled} =
       http_json(

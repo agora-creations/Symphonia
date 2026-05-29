@@ -14,7 +14,7 @@ export default async function RepoLayout({
   const key = repoKey.toUpperCase();
 
   return (
-    <DocsProvider>
+    <DocsProvider repoKey={key}>
       <NewTaskProvider repoKey={key}>
         <RepoLayoutClient repoKey={key}>
           {children}

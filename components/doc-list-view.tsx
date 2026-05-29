@@ -36,7 +36,7 @@ export function DocListView({
   description,
   emptyHint,
 }: Props) {
-  const { forRepo } = useDocs();
+  const { forRepo, hydrated } = useDocs();
   const { startDraft } = useDraftHost();
   const repoSlug = repoKey.toLowerCase();
   const pages = useMemo(
@@ -65,7 +65,11 @@ export function DocListView({
         <div className="mx-auto w-full max-w-3xl px-4 py-5">
           <p className="mb-5 text-sm text-muted-foreground">{description}</p>
 
-          {pages.length === 0 ? (
+          {!hydrated ? (
+            <div className="rounded-[10px] border border-dashed p-8 text-center">
+              <p className="text-sm font-medium">Loading {heading.toLowerCase()}...</p>
+            </div>
+          ) : pages.length === 0 ? (
             <div className="rounded-[10px] border border-dashed p-8 text-center">
               <p className="text-sm font-medium">No {heading.toLowerCase()} yet</p>
               <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
