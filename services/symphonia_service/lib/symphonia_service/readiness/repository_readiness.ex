@@ -27,7 +27,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
       |> Kernel.++(planning_checks(repository))
       |> Kernel.++(automation_checks(repository, registry_path))
       |> Kernel.++(provider_checks())
-      |> Kernel.++(runner_checks(registry_path))
+      |> Kernel.++(runner_checks(repository, registry_path))
       |> Kernel.++(validation_checks(repository))
       |> Kernel.++(github_checks(repository))
       |> Kernel.++(review_checks(repository))
@@ -381,9 +381,14 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
     ]
   end
 
-  defp runner_checks(registry_path) do
+  defp runner_checks(repository, registry_path) do
     runners = RunnerRegistry.capacity(registry_path)
     local = runners["localService"] || %{}
+    remote = runners["remote"] || []
+
+    remote_execution_allowed? =
+      SymphoniaService.Runners.RepositoryPolicy.remote_execution_allowed?(repository)
+
     capabilities = local["capabilities"] || %{}
 
     [
@@ -411,9 +416,22 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
       check(
         "runner.remote_execution",
         "Remote execution",
-        "warning",
+        if(remote_execution_allowed?, do: "passed", else: "warning"),
         "runner",
-        "Remote runner registration is available, but remote execution is disabled by default."
+        if(remote_execution_allowed?,
+          do: "Remote execution is enabled for this repository.",
+          else: "Remote execution is disabled by repository policy."
+        )
+      ),
+      check(
+        "runner.remote_registered",
+        "Remote runner registered",
+        if(remote == [], do: "warning", else: "passed"),
+        "runner",
+        if(remote == [],
+          do: "No remote runners are registered. Local service remains available.",
+          else: "At least one remote runner is registered."
+        )
       )
     ]
   end

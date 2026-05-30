@@ -125,6 +125,7 @@ export interface RepositorySummary {
   path: string;
   github?: GitHubRepositoryLink | null;
   automation?: RepositoryAutomationState | null;
+  remoteExecutionAllowed?: boolean;
   last_task_number?: number;
   lastTaskNumber?: number;
   taskCount?: number;

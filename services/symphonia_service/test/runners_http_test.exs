@@ -97,6 +97,30 @@ defmodule SymphoniaService.RunnersHTTPTest do
     assert heartbeat.status == 200
     assert heartbeat.body["runner"]["status"] == "online"
 
+    bad_claim =
+      http_json(
+        port,
+        "POST",
+        "/api/runners/#{runner["id"]}/assignments/claim",
+        ~s({"token":"wrong"}),
+        []
+      )
+
+    assert bad_claim.status == 403
+    assert bad_claim.body["reasonCode"] == "invalid_runner_token"
+
+    empty_claim =
+      http_json(
+        port,
+        "POST",
+        "/api/runners/#{runner["id"]}/assignments/claim",
+        ~s({"token":"local-dev-token"}),
+        []
+      )
+
+    assert empty_claim.status == 200
+    assert empty_claim.body["assignment"] == nil
+
     disabled =
       http_json(
         port,

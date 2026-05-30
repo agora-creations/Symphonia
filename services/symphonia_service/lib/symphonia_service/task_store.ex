@@ -456,6 +456,9 @@ defmodule SymphoniaService.TaskStore do
       "displayStep" => run["display_step"] || RunEvents.display_step(run),
       "displayMessage" => run["display_message"] || RunEvents.display_message(run),
       "eligibilityReason" => run["eligibility_reason"],
+      "runner" => public_runner(run["runner"]),
+      "executionMode" => run["execution_mode"],
+      "assignmentId" => run["assignment_id"],
       "workspaceProvider" => run["workspace_provider"],
       "reviewBranch" => run["review_branch"],
       "curatedSummaryPath" => run["curated_summary_path"],
@@ -471,6 +474,17 @@ defmodule SymphoniaService.TaskStore do
   end
 
   defp public_run(_run), do: nil
+
+  defp public_runner(%{"id" => id, "mode" => mode, "name" => name})
+       when is_binary(id) and is_binary(mode) and is_binary(name) do
+    %{
+      "id" => String.slice(id, 0, 120),
+      "mode" => String.slice(mode, 0, 80),
+      "name" => String.slice(name, 0, 120)
+    }
+  end
+
+  defp public_runner(_runner), do: nil
 
   defp public_handoff(handoff) when is_map(handoff) do
     %{

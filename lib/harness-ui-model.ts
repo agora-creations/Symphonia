@@ -41,7 +41,15 @@ export interface HarnessStatusLike {
 }
 
 export interface CompactRunBadge {
-  label: "Working" | "Checking changes" | "Ready for review" | "Failed" | "Canceled";
+  label:
+    | "Working"
+    | "Running on runner"
+    | "Importing patch"
+    | "Validating changes"
+    | "Checking changes"
+    | "Ready for review"
+    | "Failed"
+    | "Canceled";
   tone: "neutral" | "ready" | "warning";
 }
 
@@ -146,6 +154,16 @@ export function workspaceProviderLabel(run?: CodingAssistantRun | null): string 
   }
 }
 
+export function executionModeLabel(run?: CodingAssistantRun | null): string {
+  return run?.executionMode === "remote" || run?.runner?.mode === "remote_runner"
+    ? "Remote"
+    : "Local";
+}
+
+export function runRunnerLabel(run?: CodingAssistantRun | null): string {
+  return run?.runner?.name ?? "Local service";
+}
+
 export function compactRunBadge(run?: CodingAssistantRun | null): CompactRunBadge | null {
   if (!run) return null;
 
@@ -154,6 +172,15 @@ export function compactRunBadge(run?: CodingAssistantRun | null): CompactRunBadg
   if (run.state === "canceled") return { label: "Canceled", tone: "warning" };
 
   const step = run.displayStep ?? run.currentStep ?? "";
+  if (step.includes("runner") || step.includes("Runner")) {
+    return { label: "Running on runner", tone: "neutral" };
+  }
+  if (step.includes("Importing")) {
+    return { label: "Importing patch", tone: "neutral" };
+  }
+  if (step.includes("Validating")) {
+    return { label: "Validating changes", tone: "neutral" };
+  }
   if (step.includes("Checking") || step.includes("Detecting") || step.includes("Creating")) {
     return { label: "Checking changes", tone: "neutral" };
   }

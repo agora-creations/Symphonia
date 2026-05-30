@@ -11,6 +11,8 @@ defmodule SymphoniaService.Access.AuditLog do
     reviewBranch
     githubPrUrl
     reasonCode
+    assignmentId
+    changedFileCount
     runnerId
     runnerMode
     capabilitySummary

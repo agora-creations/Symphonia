@@ -24,21 +24,49 @@ defmodule SymphoniaService.Runners.FakeRunner do
     )
   end
 
-  def patch_bundle_fixture(runner_id \\ "fake-runner", run_id \\ "run_123") do
+  def patch_bundle_fixture(
+        runner_id \\ "fake-runner",
+        run_id \\ "run_123",
+        assignment_id \\ "assignment_123"
+      ) do
+    diff =
+      """
+      diff --git a/app/example.tsx b/app/example.tsx
+      new file mode 100644
+      index 0000000..1269488
+      --- /dev/null
+      +++ b/app/example.tsx
+      @@ -0,0 +1 @@
+      +export const example = true;
+      """
+      |> String.trim_leading()
+
     %{
-      "runner_id" => runner_id,
-      "run_id" => run_id,
-      "result_type" => "patch_bundle",
-      "files_changed" => [
-        %{
-          "path" => "app/example.tsx",
-          "patch" => "diff --git a/app/example.tsx b/app/example.tsx"
-        }
-      ],
-      "validation" => [
+      "assignmentId" => assignment_id,
+      "runnerId" => runner_id,
+      "runId" => run_id,
+      "status" => "completed",
+      "baseSha" => "base-sha",
+      "headSha" => "head-sha",
+      "patchBundle" => %{
+        "format" => "git_diff",
+        "encoding" => "utf8",
+        "sha256" => SymphoniaService.Runners.PatchBundle.sha256(diff),
+        "diff" => diff
+      },
+      "changedFiles" => [%{"path" => "app/example.tsx", "status" => "added"}],
+      "changedFilesDigest" =>
+        SymphoniaService.Runners.PatchBundle.changed_files_digest(["app/example.tsx"]),
+      "runnerValidation" => [
         %{"label" => "Tests", "status" => "passed", "detail" => "Fake validation passed."}
       ],
-      "public_summary" => "Fake runner produced a fixture patch."
+      "publicTimeline" => [
+        %{
+          "step" => "running_provider",
+          "message" => "Runner completed the Coding Assistant turn."
+        }
+      ],
+      "publicSummary" => "Fake runner produced a fixture patch."
     }
   end
 end

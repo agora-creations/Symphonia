@@ -26,6 +26,13 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
     "Starting Codex thread" => "Starting Codex thread",
     "Starting Codex turn" => "Starting Codex turn",
     "Codex is working" => "Codex is working",
+    "Queued for runner" => "Queued for runner",
+    "Claimed by runner" => "Claimed by runner",
+    "Running on runner" => "Running on runner",
+    "Receiving remote result" => "Receiving result",
+    "Importing returned patch" => "Importing returned patch",
+    "Checking imported changes" => "Importing returned patch",
+    "Validating imported changes" => "Validating imported changes",
     "Running Coding Assistant" => "Starting Codex",
     "Detecting changed files" => "Checking changes",
     "Running validation" => "Running validation",
@@ -75,6 +82,12 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
       "Starting Codex thread" -> "Symphonia is preparing the Codex thread for this task."
       "Starting Codex turn" -> "Symphonia is starting the Codex turn."
       "Codex is working" -> "Codex is working from the task brief."
+      "Queued for runner" -> "Symphonia queued this run for the selected runner."
+      "Claimed by runner" -> "The selected runner claimed this assignment."
+      "Running on runner" -> "The selected runner is working on this task."
+      "Receiving result" -> "Symphonia is receiving the runner's patch result."
+      "Importing returned patch" -> "Symphonia is importing the returned patch locally."
+      "Validating imported changes" -> "Symphonia is validating imported changes locally."
       "Starting Codex" -> "Codex is working from the task brief."
       "Checking changes" -> "Codex finished its turn and Symphonia is checking the changed files."
       "Running validation" -> "Symphonia is running local validation for the handoff."

@@ -4,7 +4,8 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
   """
 
   alias SymphoniaService.Access.{Actor, AuditLog, Policy}
-  alias SymphoniaService.Runners.{Capabilities, LocalService, Registry}
+  alias SymphoniaService.Harness.Daemon
+  alias SymphoniaService.Runners.{Capabilities, LocalService, Registry, RepositoryPolicy}
 
   def select_for_run(registry_path, repository, actor, opts \\ []) do
     requested_runner_id = Keyword.get(opts, :runner_id)
@@ -36,11 +37,13 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
     with {:ok, private_runner} <- Registry.get(registry_path, runner_id),
          public_runner <- Registry.public(private_runner),
          :ok <- require_online(public_runner),
+         :ok <- require_trusted(private_runner),
          :ok <- require_capabilities(public_runner, opts),
          :ok <- require_capacity(public_runner),
          :ok <- require_permission(actor, repository),
          :ok <- require_repository_policy(repository),
-         :ok <- require_execution_flag(opts) do
+         :ok <- require_execution_flag(opts),
+         :ok <- require_harness_not_paused(registry_path, opts) do
       runner = metadata(public_runner)
 
       audit_selection(
@@ -77,12 +80,19 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
   defp require_online(%{"status" => "offline"}), do: {:error, "runner_offline"}
   defp require_online(_runner), do: {:error, "runner_unavailable"}
 
+  defp require_trusted(%{"trusted" => false}), do: {:error, "runner_untrusted"}
+  defp require_trusted(_runner), do: :ok
+
   defp require_capabilities(%{"capabilities" => capabilities}, opts) do
     workspace_provider = Keyword.get(opts, :workspace_provider, "local_git_worktree")
+    remote_execution? = Keyword.get(opts, :remote_execution, false) == true
 
     cond do
       capabilities["codexAppServer"] != true ->
         {:error, "missing_codex_capability"}
+
+      remote_execution? ->
+        :ok
 
       workspace_provider == "local_git_worktree" and capabilities["localGitWorktree"] != true ->
         {:error, "missing_workspace_capability"}
@@ -109,7 +119,7 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
   end
 
   defp require_repository_policy(repository) do
-    if remote_execution_allowed?(repository) do
+    if RepositoryPolicy.remote_execution_allowed?(repository) do
       :ok
     else
       {:error, "remote_execution_disabled"}
@@ -124,13 +134,14 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
     end
   end
 
-  defp remote_execution_allowed?(repository) when is_map(repository) do
-    repository["remoteExecutionAllowed"] == true or repository["remote_execution_allowed"] == true or
-      get_in(repository, ["automation", "remoteExecutionAllowed"]) == true or
-      get_in(repository, ["automation", "remote_execution_allowed"]) == true
+  defp require_harness_not_paused(registry_path, opts) do
+    if Keyword.get(opts, :remote_execution, false) == true and
+         Daemon.peek_status(registry_path)["paused"] == true do
+      {:error, "harness_paused"}
+    else
+      :ok
+    end
   end
-
-  defp remote_execution_allowed?(_repository), do: false
 
   defp metadata(public_runner) do
     %{
@@ -168,7 +179,9 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
   defp rejection_message("runner_disabled"), do: "Requested runner is disabled."
   defp rejection_message("runner_stale"), do: "Requested runner heartbeat is stale."
   defp rejection_message("runner_offline"), do: "Requested runner is offline."
+  defp rejection_message("runner_untrusted"), do: "Requested runner is not trusted."
   defp rejection_message("missing_codex_capability"), do: "Requested runner cannot run Codex."
+  defp rejection_message("harness_paused"), do: "Remote runner execution is paused."
 
   defp rejection_message("missing_workspace_capability"),
     do: "Requested runner cannot use this workspace provider."

@@ -6,6 +6,7 @@ const ACTOR_HEADER_NAMES = [
   "x-symphonia-actor",
   "x-symphonia-actor-id",
   "x-symphonia-role",
+  "x-runner-token",
 ] as const;
 
 export async function proxyToSymphoniaService(

@@ -180,9 +180,10 @@ defmodule SymphoniaService.RunnersRegistryTest do
   test "fake runner exposes a future patch-bundle fixture" do
     fixture = FakeRunner.patch_bundle_fixture("fake-runner", "run_123")
 
-    assert fixture["result_type"] == "patch_bundle"
-    assert [%{"path" => "app/example.tsx"}] = fixture["files_changed"]
-    assert [%{"status" => "passed"}] = fixture["validation"]
+    assert fixture["patchBundle"]["format"] == "git_diff"
+    assert fixture["patchBundle"]["sha256"]
+    assert [%{"path" => "app/example.tsx"}] = fixture["changedFiles"]
+    assert [%{"status" => "passed"}] = fixture["runnerValidation"]
   end
 
   defp overwrite_runner(registry_path, runner_id, attrs) do

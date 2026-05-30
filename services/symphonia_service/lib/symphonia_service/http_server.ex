@@ -20,7 +20,14 @@ defmodule SymphoniaService.HTTPServer do
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
   alias SymphoniaService.Harness.{Automation, Daemon, Eligibility}
   alias SymphoniaService.Readiness.{RepositoryReadiness, RepositoryScanner, SetupActions}
-  alias SymphoniaService.Runners.{Capabilities, Registry, SelectionPolicy}
+
+  alias SymphoniaService.Runners.{
+    Assignments,
+    Capabilities,
+    Registry,
+    RepositoryPolicy,
+    SelectionPolicy
+  }
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
@@ -115,13 +122,19 @@ defmodule SymphoniaService.HTTPServer do
     error -> {400, %{"error" => Exception.message(error)}}
   end
 
-  defp route(%{method: "GET", path: path}, registry_path, actor) do
+  defp route(%{method: "GET", path: path, headers: headers}, registry_path, actor) do
     case path_parts(path) do
       ["api", "runners"] ->
         guarded_read(registry_path, actor, global_repository(), "runner.view", fn ->
           audit_runner_transitions(registry_path, actor)
           {200, %{"runners" => Registry.list(registry_path)}}
         end)
+
+      ["api", "runners", runner_id, "assignments", "current"] ->
+        case Assignments.current(registry_path, runner_id, runner_token(headers, %{})) do
+          {:ok, assignment} -> {200, Assignments.runner_response(assignment)}
+          {:error, reason} -> runner_assignment_error(reason)
+        end
 
       ["api", "repositories", repo, "access"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -239,6 +252,10 @@ defmodule SymphoniaService.HTTPServer do
       ["api", "repositories", repo, "automation"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "automation" => Automation.status(repository)}}
+
+      ["api", "repositories", repo, "remote-execution"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, %{"repo" => repository["key"], "policy" => RepositoryPolicy.public(repository)}}
 
       ["api", "harness", "daemon"] ->
         Daemon.ensure_started(registry_path)
@@ -398,7 +415,7 @@ defmodule SymphoniaService.HTTPServer do
     error -> {400, %{"error" => Exception.message(error)}}
   end
 
-  defp route(%{method: "POST", path: path, body: body}, registry_path, actor) do
+  defp route(%{method: "POST", path: path, body: body, headers: headers}, registry_path, actor) do
     case path_parts(path) do
       ["api", "runners", "register"] ->
         guarded_runner_action(registry_path, actor, "runner.register", runner_target(), fn ->
@@ -435,6 +452,56 @@ defmodule SymphoniaService.HTTPServer do
 
           {:error, _reason} ->
             {400, %{"error" => "Invalid runner heartbeat.", "reasonCode" => "invalid_heartbeat"}}
+        end
+
+      ["api", "runners", runner_id, "assignments", "claim"] ->
+        payload = decode_json(body)
+
+        case Assignments.claim(registry_path, runner_id, runner_token(headers, payload)) do
+          {:ok, assignment} -> {200, Assignments.runner_response(assignment)}
+          {:error, reason} -> runner_assignment_error(reason)
+        end
+
+      ["api", "runners", runner_id, "assignments", assignment_id, "events"] ->
+        payload = decode_json(body)
+
+        case Assignments.record_event(
+               registry_path,
+               runner_id,
+               assignment_id,
+               runner_token(headers, payload),
+               payload
+             ) do
+          {:ok, assignment} -> {200, Assignments.public_response(assignment)}
+          {:error, reason} -> runner_assignment_error(reason)
+        end
+
+      ["api", "runners", runner_id, "assignments", assignment_id, "result"] ->
+        payload = decode_json(body)
+
+        case Assignments.submit_result(
+               registry_path,
+               runner_id,
+               assignment_id,
+               runner_token(headers, payload),
+               payload
+             ) do
+          {:ok, assignment, _mode} -> {200, Assignments.public_response(assignment)}
+          {:error, reason} -> runner_assignment_error(reason)
+        end
+
+      ["api", "runners", runner_id, "assignments", assignment_id, "fail"] ->
+        payload = decode_json(body)
+
+        case Assignments.fail(
+               registry_path,
+               runner_id,
+               assignment_id,
+               runner_token(headers, payload),
+               payload
+             ) do
+          {:ok, assignment, _mode} -> {200, Assignments.public_response(assignment)}
+          {:error, reason} -> runner_assignment_error(reason)
         end
 
       ["api", "runners", runner_id, "disable"] ->
@@ -786,6 +853,36 @@ defmodule SymphoniaService.HTTPServer do
           {200, %{"repo" => repository["key"], "automation" => Automation.status(repository)}}
         end)
 
+      ["api", "repositories", repo, "remote-execution", "enable"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "repository.configure",
+          repository_target(),
+          fn ->
+            repository = RepositoryPolicy.set_remote_execution(registry_path, repo, true)
+            {200, %{"repo" => repository["key"], "policy" => RepositoryPolicy.public(repository)}}
+          end
+        )
+
+      ["api", "repositories", repo, "remote-execution", "disable"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "repository.configure",
+          repository_target(),
+          fn ->
+            repository = RepositoryPolicy.set_remote_execution(registry_path, repo, false)
+            {200, %{"repo" => repository["key"], "policy" => RepositoryPolicy.public(repository)}}
+          end
+        )
+
       ["api", "harness", "daemon", "tick"] ->
         repository = harness_repository(registry_path, path)
 
@@ -914,7 +1011,7 @@ defmodule SymphoniaService.HTTPServer do
           "task.cancel_run",
           task_target(task_key),
           fn ->
-            result = CodingAssistant.cancel_run(repository, task_key, run_id)
+            result = CodingAssistant.cancel_run(repository, task_key, run_id, registry_path)
 
             {200,
              %{
@@ -1005,7 +1102,8 @@ defmodule SymphoniaService.HTTPServer do
                SelectionPolicy.select_for_run(registry_path, repository, actor,
                  runner_id: runner_id(payload),
                  workspace_provider: workspace_provider(payload) || "local_git_worktree",
-                 allow_remote_execution: false
+                 allow_remote_execution: remote_execution_requested?(payload),
+                 remote_execution: remote_execution_requested?(payload)
                ) do
           try do
             result =
@@ -1013,7 +1111,9 @@ defmodule SymphoniaService.HTTPServer do
                 registry_path,
                 repository,
                 task_key,
-                Map.put(payload, "runner", runner)
+                payload
+                |> Map.put("runner", runner)
+                |> Map.put("actor", actor)
               )
 
             AuditLog.record(registry_path, repository, %{
@@ -1229,11 +1329,88 @@ defmodule SymphoniaService.HTTPServer do
   defp runner_id(payload) when is_map(payload), do: payload["runnerId"] || payload["runner_id"]
   defp runner_id(_payload), do: nil
 
+  defp runner_token(headers, payload) when is_map(headers) and is_map(payload) do
+    headers["x-runner-token"] || payload["token"] || payload["runnerToken"] ||
+      payload["runner_token"]
+  end
+
+  defp runner_assignment_error(:invalid_token),
+    do: {403, %{"error" => "Invalid runner token.", "reasonCode" => "invalid_runner_token"}}
+
+  defp runner_assignment_error(:not_found),
+    do: {404, %{"error" => "Assignment or runner not found.", "reasonCode" => "not_found"}}
+
+  defp runner_assignment_error(:runner_disabled),
+    do: {403, %{"error" => "Runner is disabled.", "reasonCode" => "runner_disabled"}}
+
+  defp runner_assignment_error(:runner_stale),
+    do: {403, %{"error" => "Runner heartbeat is stale.", "reasonCode" => "runner_stale"}}
+
+  defp runner_assignment_error(:runner_offline),
+    do: {403, %{"error" => "Runner is offline.", "reasonCode" => "runner_offline"}}
+
+  defp runner_assignment_error(:invalid_transition),
+    do:
+      {409,
+       %{"error" => "Invalid assignment state transition.", "reasonCode" => "invalid_transition"}}
+
+  defp runner_assignment_error(:assignment_finalized),
+    do:
+      {409,
+       %{
+         "error" => "Assignment is already finalized.",
+         "reasonCode" => "assignment_already_finalized"
+       }}
+
+  defp runner_assignment_error(reason) when is_binary(reason) do
+    status =
+      if reason in [
+           "assignment_already_finalized",
+           "assignment_canceled",
+           "import_in_progress"
+         ],
+         do: 409,
+         else: 400
+
+    {status, %{"error" => assignment_error_message(reason), "reasonCode" => reason}}
+  end
+
+  defp runner_assignment_error(reason),
+    do:
+      {400, %{"error" => "Runner assignment request failed.", "reasonCode" => to_string(reason)}}
+
+  defp assignment_error_message("assignment_already_finalized"),
+    do: "Assignment is already finalized."
+
+  defp assignment_error_message("assignment_canceled"), do: "Assignment was canceled."
+  defp assignment_error_message("import_in_progress"), do: "Assignment import is already running."
+  defp assignment_error_message("base_sha_mismatch"), do: "Patch base revision does not match."
+  defp assignment_error_message("patch_digest_mismatch"), do: "Patch digest does not match."
+
+  defp assignment_error_message("changed_files_mismatch"),
+    do: "Changed files do not match the patch."
+
+  defp assignment_error_message("changed_files_digest_mismatch"),
+    do: "Changed-file digest does not match."
+
+  defp assignment_error_message("protected_path_rejected"),
+    do: "Patch modifies protected Symphonia metadata."
+
+  defp assignment_error_message("empty_patch"), do: "Patch bundle is empty."
+  defp assignment_error_message(reason), do: "Runner assignment failed: #{reason}."
+
   defp workspace_provider(payload) when is_map(payload) do
     payload["workspace_provider"] || payload["workspaceProvider"]
   end
 
   defp workspace_provider(_payload), do: nil
+
+  defp remote_execution_requested?(payload) when is_map(payload) do
+    (payload["allowRemoteExecution"] == true or payload["allow_remote_execution"] == true) and
+      is_binary(runner_id(payload)) and runner_id(payload) not in ["", "local-service"]
+  end
+
+  defp remote_execution_requested?(_payload), do: false
 
   defp path_parts(path) do
     path
@@ -1260,7 +1437,7 @@ defmodule SymphoniaService.HTTPServer do
       "content-type: application/json\r\n",
       "access-control-allow-origin: *\r\n",
       "access-control-allow-methods: GET,POST,PATCH,DELETE,OPTIONS\r\n",
-      "access-control-allow-headers: content-type,x-symphonia-actor,x-symphonia-actor-id,x-symphonia-role\r\n",
+      "access-control-allow-headers: content-type,x-symphonia-actor,x-symphonia-actor-id,x-symphonia-role,x-runner-token\r\n",
       "content-length: #{byte_size(body)}\r\n",
       "\r\n",
       body
@@ -1323,7 +1500,8 @@ defmodule SymphoniaService.HTTPServer do
       "workspace" => workspace,
       "taskCount" => task_count,
       "github" => RepositoryLink.link(repository),
-      "automation" => Automation.status(repository)
+      "automation" => Automation.status(repository),
+      "remoteExecutionAllowed" => RepositoryPolicy.remote_execution_allowed?(repository)
     })
   end
 

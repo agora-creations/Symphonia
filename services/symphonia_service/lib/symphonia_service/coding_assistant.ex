@@ -17,7 +17,7 @@ defmodule SymphoniaService.CodingAssistant do
   }
 
   alias SymphoniaService.Access.Actor
-  alias SymphoniaService.Runners.{LocalService, SelectionPolicy}
+  alias SymphoniaService.Runners.{Assignments, AssignmentStore, LocalService, SelectionPolicy}
   alias SymphoniaService.TaskStore
 
   @continuation_max_attempts 2
@@ -28,31 +28,58 @@ defmodule SymphoniaService.CodingAssistant do
 
     provider = provider()
 
+    runner = Map.get(params, "runner", LocalService.runner_metadata())
+    if remote_runner?(runner), do: Assignments.preflight(repository, task)
+
     run =
       RunStore.create(%{
         "provider" => provider_id(provider),
         "repository" => repository["key"],
         "task" => task_key,
         "kind" => "assignment",
-        "runner" => Map.get(params, "runner", LocalService.runner_metadata()),
+        "runner" => runner,
+        "execution_mode" => execution_mode_for(runner),
         "codex_thread_id" => previous_codex_thread_id(task)
       })
 
     TaskStore.apply_event(repository, task_key, "start")
     task = put_task_run(repository, task_key, run)
 
-    {:ok, _pid} =
-      RunSupervisor.start_run(%{
-        "registry_path" => registry_path,
-        "repository" => repository,
-        "task_key" => task_key,
-        "provider" => provider,
-        "params" => params,
-        "kind" => "assignment",
-        "run" => run
-      })
+    if remote_runner?(runner) do
+      actor = Map.get(params, "actor", Actor.default())
 
-    %{"run" => RunStore.public(run), "task" => task}
+      {:ok, assignment} =
+        Assignments.create_for_run(registry_path, repository, task, run, runner, actor, params)
+
+      run =
+        run
+        |> RunStore.update_metadata(%{
+          "assignment_id" => assignment["id"],
+          "execution_mode" => "remote"
+        })
+        |> RunStore.mark_step("Queued for runner")
+
+      task = put_task_run(repository, task_key, run)
+
+      %{
+        "run" => RunStore.public(run),
+        "task" => task,
+        "assignment" => AssignmentStore.public(assignment)
+      }
+    else
+      {:ok, _pid} =
+        RunSupervisor.start_run(%{
+          "registry_path" => registry_path,
+          "repository" => repository,
+          "task_key" => task_key,
+          "provider" => provider,
+          "params" => params,
+          "kind" => "assignment",
+          "run" => run
+        })
+
+      %{"run" => RunStore.public(run), "task" => task}
+    end
   end
 
   def start_harness_run(registry_path, repository, task_key, params \\ %{}) do
@@ -189,7 +216,12 @@ defmodule SymphoniaService.CodingAssistant do
     end
   end
 
-  def cancel_run(repository, task_key, run_id) do
+  def cancel_run(
+        repository,
+        task_key,
+        run_id,
+        registry_path \\ SymphoniaService.default_registry_path()
+      ) do
     case RunStore.get(run_id) do
       nil ->
         raise ArgumentError, "Run #{run_id} not found."
@@ -201,7 +233,7 @@ defmodule SymphoniaService.CodingAssistant do
           if RunEvents.terminal?(run) do
             %{"run" => RunStore.public(run), "task" => TaskStore.get_task(repository, task_key)}
           else
-            case Cancellation.cancel(run_id) do
+            case Cancellation.cancel(run_id, registry_path, repository, task_key) do
               {:ok, result} -> result
               {:error, reason} -> raise ArgumentError, reason
             end
@@ -282,6 +314,8 @@ defmodule SymphoniaService.CodingAssistant do
       "display_message" => RunEvents.display_message(run),
       "eligibility_reason" => run["eligibility_reason"],
       "runner" => run["runner"],
+      "execution_mode" => run["execution_mode"],
+      "assignment_id" => run["assignment_id"],
       "workspace_provider" => run["workspace_provider"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],
@@ -314,6 +348,12 @@ defmodule SymphoniaService.CodingAssistant do
       "coding_assistant"
     end
   end
+
+  defp remote_runner?(%{"mode" => "remote_runner"}), do: true
+  defp remote_runner?(_runner), do: false
+
+  defp execution_mode_for(%{"mode" => "remote_runner"}), do: "remote"
+  defp execution_mode_for(_runner), do: "local"
 
   defp previous_codex_thread_id(task) do
     latest_private_codex_thread_id(task) ||

@@ -394,10 +394,17 @@ defmodule SymphoniaService.RepositoryRegistry do
       _ -> normalized
     end
     |> maybe_put_map("automation", repository["automation"])
+    |> maybe_put_boolean("remoteExecutionAllowed", remote_execution_allowed?(repository))
   end
 
   defp maybe_put_map(map, key, value) when is_map(value), do: Map.put(map, key, value)
   defp maybe_put_map(map, _key, _value), do: map
+  defp maybe_put_boolean(map, key, value) when is_boolean(value), do: Map.put(map, key, value)
+  defp maybe_put_boolean(map, _key, _value), do: map
+
+  defp remote_execution_allowed?(repository) do
+    repository["remoteExecutionAllowed"] == true or repository["remote_execution_allowed"] == true
+  end
 
   defp normalize_key(value) when is_binary(value) do
     value

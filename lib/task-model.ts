@@ -72,6 +72,8 @@ export interface CodingAssistantRun {
     mode: "local_service" | "remote_runner" | string;
     name: string;
   };
+  executionMode?: "local" | "remote" | string;
+  assignmentId?: string;
   workspaceProvider?: "local_git_worktree" | "experimental_sandbox" | string;
   workspacePath?: string;
   codexThreadId?: string;

@@ -461,6 +461,41 @@ async function setAutomationEnabled(
   return payload.automation;
 }
 
+interface RemoteExecutionPolicy {
+  remoteExecutionAllowed: boolean;
+}
+
+async function fetchRemoteExecutionPolicy(repoKey: string): Promise<RemoteExecutionPolicy> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/remote-execution`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as { policy?: RemoteExecutionPolicy; error?: string };
+  if (!res.ok || !payload.policy) {
+    throw new Error(payload.error ?? "Could not load remote execution policy");
+  }
+  return payload.policy;
+}
+
+async function setRemoteExecutionAllowed(
+  repoKey: string,
+  allowed: boolean,
+): Promise<RemoteExecutionPolicy> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/remote-execution/${
+      allowed ? "enable" : "disable"
+    }`,
+    {
+      method: "POST",
+      cache: "no-store",
+    },
+  );
+  const payload = (await res.json()) as { policy?: RemoteExecutionPolicy; error?: string };
+  if (!res.ok || !payload.policy) {
+    throw new Error(payload.error ?? "Could not update remote execution policy");
+  }
+  return payload.policy;
+}
+
 interface HarnessStatus {
   running: boolean;
   online?: boolean;
@@ -717,15 +752,18 @@ function HarnessPanel({
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"pause" | "resume" | "tick" | "reconcile" | null>(null);
   const [pendingRunnerAction, setPendingRunnerAction] = useState<string | null>(null);
+  const [remotePolicy, setRemotePolicy] = useState<RemoteExecutionPolicy | null>(null);
+  const [pendingRemotePolicy, setPendingRemotePolicy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     const refresh = () => {
-      fetchHarnessStatus()
-        .then((nextStatus) => {
+      Promise.all([fetchHarnessStatus(), fetchRemoteExecutionPolicy(repoKey)])
+        .then(([nextStatus, nextPolicy]) => {
           if (cancelled) return;
           setStatus(nextStatus);
+          setRemotePolicy(nextPolicy);
           setError(null);
         })
         .catch((err: unknown) => {
@@ -739,7 +777,7 @@ function HarnessPanel({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [repoKey]);
 
   const runAction = async (action: "pause" | "resume" | "tick" | "reconcile") => {
     setPendingAction(action);
@@ -765,6 +803,23 @@ function HarnessPanel({
       setError(err instanceof Error ? err.message : "Could not update runner");
     } finally {
       setPendingRunnerAction(null);
+    }
+  };
+
+  const toggleRemotePolicy = async () => {
+    setPendingRemotePolicy(true);
+    setError(null);
+    try {
+      const nextPolicy = await setRemoteExecutionAllowed(
+        repoKey,
+        !(remotePolicy?.remoteExecutionAllowed ?? false),
+      );
+      setRemotePolicy(nextPolicy);
+      window.dispatchEvent(new CustomEvent("symphonia:readinessUpdated"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update remote execution policy");
+    } finally {
+      setPendingRemotePolicy(false);
     }
   };
 
@@ -862,6 +917,9 @@ function HarnessPanel({
       <RunnerCapacitySection
         runners={status?.runners}
         access={access}
+        remotePolicy={remotePolicy}
+        pendingRemotePolicy={pendingRemotePolicy}
+        onToggleRemotePolicy={toggleRemotePolicy}
         pendingAction={pendingRunnerAction}
         onAction={runRunnerAction}
       />
@@ -947,16 +1005,24 @@ function HarnessPanel({
 function RunnerCapacitySection({
   runners,
   access,
+  remotePolicy,
+  pendingRemotePolicy,
+  onToggleRemotePolicy,
   pendingAction,
   onAction,
 }: {
   runners?: HarnessStatus["runners"];
   access: RepositoryAccess | null;
+  remotePolicy: RemoteExecutionPolicy | null;
+  pendingRemotePolicy: boolean;
+  onToggleRemotePolicy: () => void;
   pendingAction: string | null;
   onAction: (runner: RunnerStatusRow, action: "enable" | "disable") => void;
 }) {
   const localService = runners?.localService;
   const remote = runners?.remote ?? [];
+  const remoteAllowed = remotePolicy?.remoteExecutionAllowed === true;
+  const policyDisabledReason = disabledReason(access, "repository.configure");
 
   return (
     <div className="border-t px-3 py-3">
@@ -993,6 +1059,7 @@ function RunnerCapacitySection({
               key={runner.id}
               runner={runner}
               access={access}
+              remoteAllowed={remoteAllowed}
               pendingAction={pendingAction}
               onAction={onAction}
             />
@@ -1002,6 +1069,34 @@ function RunnerCapacitySection({
             No remote runners connected.
           </div>
         )}
+
+        <div className="rounded-[8px] border bg-background/60 p-2.5 text-xs">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 font-medium">
+                <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+                <span>
+                  {remoteAllowed ? "Remote execution enabled" : "Remote execution disabled"}
+                </span>
+              </div>
+              <div className="mt-1 text-muted-foreground">
+                Only owners and maintainers can change this repository policy.
+              </div>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={
+                pendingRemotePolicy || !canAccess(access, "repository.configure")
+              }
+              title={policyDisabledReason}
+              onClick={onToggleRemotePolicy}
+            >
+              {remoteAllowed ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+              {pendingRemotePolicy ? "Updating" : remoteAllowed ? "Disable" : "Enable"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1010,11 +1105,13 @@ function RunnerCapacitySection({
 function RunnerRow({
   runner,
   access,
+  remoteAllowed,
   pendingAction,
   onAction,
 }: {
   runner: RunnerStatusRow;
   access: RepositoryAccess | null;
+  remoteAllowed?: boolean;
   pendingAction: string | null;
   onAction: (runner: RunnerStatusRow, action: "enable" | "disable") => void;
 }) {
@@ -1035,7 +1132,9 @@ function RunnerRow({
           <div className="mt-1 text-muted-foreground">{runnerCapabilitySummary(runner)}</div>
           {isRemote && (
             <div className="mt-1 text-muted-foreground">
-              Remote execution disabled by default.
+              {remoteAllowed
+                ? "Remote execution enabled for this repository."
+                : "Remote execution disabled for this repository."}
             </div>
           )}
         </div>

@@ -104,6 +104,24 @@ defmodule SymphoniaService.Runners.Registry do
 
   def heartbeat(_registry_path, _runner_id, _token, _attrs), do: {:error, :invalid_payload}
 
+  def authenticate(registry_path, runner_id, token) when is_binary(runner_id) do
+    token = to_string(token || "")
+
+    case Enum.find(read_remote(registry_path), &(&1["id"] == runner_id)) do
+      nil ->
+        {:error, :not_found}
+
+      runner ->
+        if secure_equal?(runner["tokenHash"], token_hash(token)) do
+          {:ok, Map.put(runner, "status", Heartbeat.status(runner))}
+        else
+          {:error, :invalid_token}
+        end
+    end
+  end
+
+  def authenticate(_registry_path, _runner_id, _token), do: {:error, :not_found}
+
   def enable(_registry_path, "local-service"), do: {:error, :local_service_immutable}
 
   def enable(registry_path, runner_id) do

@@ -30,6 +30,7 @@ import {
   canOpenPullRequest,
   canRequestChanges,
   hasFailedRequiredValidation,
+  executionModeLabel,
   isActiveRun,
   isReviewReady,
   prStateLabel,
@@ -39,6 +40,7 @@ import {
   reviewGateTone,
   runDisplayForTask,
   runOriginLabel,
+  runRunnerLabel,
   runTimelineForTask,
   safeReviewBranch,
   safeSummaryPath,
@@ -1054,6 +1056,16 @@ function TaskMeta({
         </div>
       </Section>
       {run && (
+        <Section title="Runner">
+          <span className="text-muted-foreground">{runRunnerLabel(run)}</span>
+        </Section>
+      )}
+      {run && (
+        <Section title="Execution mode">
+          <span className="text-muted-foreground">{executionModeLabel(run)}</span>
+        </Section>
+      )}
+      {run && (
         <Section title="Workspace">
           <span className="text-muted-foreground">{workspaceProviderLabel(run)}</span>
         </Section>
@@ -1068,6 +1080,9 @@ function TaskMeta({
           <p>{terminalState ?? run?.label ?? run?.state ?? "No run yet"}</p>
           {runDisplay.step && <p>{runDisplay.step}</p>}
           {runDisplay.message && <p>{runDisplay.message}</p>}
+          {run?.executionMode === "remote" && (
+            <p>Symphonia validates imported changes locally before review.</p>
+          )}
         </div>
       </Section>
       {operationalBadge && (

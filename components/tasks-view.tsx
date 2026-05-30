@@ -19,8 +19,8 @@ import { TaskStatusIcon } from "@/components/icons/task-status-icons";
 import { PriorityIcon } from "@/components/icons/status-icons";
 import { UserAvatar } from "@/components/avatar-stack";
 import { useNewTask } from "@/components/new-task-dialog";
-import { RepositoryReadinessTaskBanner } from "@/components/repository-readiness";
 import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport";
+import { RepositoryReadinessTaskBanner } from "@/components/repository-readiness";
 import { cn } from "@/lib/utils";
 import {
   canOpenPullRequest,
@@ -698,13 +698,13 @@ export function TasksView({ repoKey }: { repoKey: string }) {
         </div>
       </header>
 
-      <RepositoryReadinessTaskBanner repoKey={repoKey} />
-
       {error && (
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
           {error}
         </div>
       )}
+
+      <RepositoryReadinessTaskBanner repoKey={repoKey} />
 
       {sourceMilestone && !loading && (
         <div className="border-b bg-emerald-500/10 px-4 py-3 text-sm">
