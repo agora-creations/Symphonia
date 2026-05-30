@@ -47,6 +47,17 @@
   color-scheme: dark;
 }
 
+.landing-page {
+  --landing-cream: #faf9f6;
+  --landing-paper: #ffffff;
+  --landing-soft: #f5f3ef;
+  --landing-ink: #25211b;
+  --landing-muted: #766f64;
+  --landing-line: #e7e1d7;
+  --landing-orange: #df7832;
+  --landing-orange-dark: #b95618;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
