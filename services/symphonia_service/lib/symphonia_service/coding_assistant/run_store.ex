@@ -151,6 +151,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "executionMode" => run["execution_mode"],
       "assignmentId" => run["assignment_id"],
       "workspaceProvider" => run["workspace_provider"],
+      "cleanupWarning" => run["cleanup_warning"],
       "reviewBranch" => run["review_branch"],
       "curatedSummaryPath" => run["curated_summary_path"],
       "retryAt" => run["retry_at"],

@@ -77,6 +77,7 @@ const {
   canOpenPullRequest,
   canRequestChanges,
   daemonLabel,
+  executionModeLabel,
   harnessLabel,
   harnessStatusLabel,
   harnessStatusForTask,
@@ -219,6 +220,22 @@ test("run experience helpers derive public origin, state, and safe paths", () =>
     workspaceProviderLabel({
       id: "run-1",
       state: "completed",
+      workspaceProvider: "cloud_sandbox",
+    }),
+    "Cloud sandbox",
+  );
+  assert.equal(
+    executionModeLabel({
+      id: "run-1",
+      state: "running",
+      executionMode: "cloud_sandbox",
+    }),
+    "Cloud sandbox",
+  );
+  assert.equal(
+    workspaceProviderLabel({
+      id: "run-1",
+      state: "completed",
       workspaceProvider: "experimental_sandbox",
     }),
     "Experimental sandbox",
@@ -232,6 +249,10 @@ test("run experience helpers derive public origin, state, and safe paths", () =>
     label: "Working",
     tone: "neutral",
   });
+  assert.deepEqual(
+    compactRunBadge({ id: "run-1", state: "running", displayStep: "Running Codex in sandbox" }),
+    { label: "Running in sandbox", tone: "neutral" },
+  );
   assert.deepEqual(
     compactRunBadge({ id: "run-1", state: "running", displayStep: "Checking changes" }),
     { label: "Checking changes", tone: "neutral" },
@@ -778,6 +799,7 @@ test("access helpers map V1 roles to permissions and disabled copy", () => {
   assert.equal(canAccess(reviewer, "pull_request.open"), false);
   assert.equal(canAccess(operator, "harness.pause"), true);
   assert.equal(canAccess(operator, "runner.use_remote"), false);
+  assert.equal(canAccess(operator, "sandbox.run"), false);
   assert.equal(canAccess(operator, "review.approve"), false);
   assert.equal(disabledReason(viewer, "task.run_codex"), "You have read-only access.");
   assert.equal(
@@ -791,6 +813,10 @@ test("access helpers map V1 roles to permissions and disabled copy", () => {
   assert.equal(
     disabledReason(operator, "runner.use_remote"),
     "Only maintainers and owners can use remote runners when repository policy allows it.",
+  );
+  assert.equal(
+    disabledReason(operator, "sandbox.run"),
+    "Only maintainers and owners can run sandbox execution when repository policy allows it.",
   );
 });
 

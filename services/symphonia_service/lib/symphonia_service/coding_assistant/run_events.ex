@@ -33,6 +33,13 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
     "Importing returned patch" => "Importing returned patch",
     "Checking imported changes" => "Importing returned patch",
     "Validating imported changes" => "Validating imported changes",
+    "Creating sandbox" => "Creating sandbox",
+    "Preparing sandbox workspace" => "Preparing sandbox workspace",
+    "Running Codex in sandbox" => "Running Codex in sandbox",
+    "Receiving sandbox changes" => "Receiving sandbox changes",
+    "Releasing sandbox" => "Releasing sandbox",
+    "Sandbox released" => "Sandbox released",
+    "Sandbox cleanup needs attention" => "Sandbox cleanup needs attention",
     "Running Coding Assistant" => "Starting Codex",
     "Detecting changed files" => "Checking changes",
     "Running validation" => "Running validation",
@@ -88,6 +95,13 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
       "Receiving result" -> "Symphonia is receiving the runner's patch result."
       "Importing returned patch" -> "Symphonia is importing the returned patch locally."
       "Validating imported changes" -> "Symphonia is validating imported changes locally."
+      "Creating sandbox" -> "Symphonia is creating an isolated sandbox workspace."
+      "Preparing sandbox workspace" -> "Symphonia is preparing the sandbox workspace."
+      "Running Codex in sandbox" -> "Codex is working inside the sandbox."
+      "Receiving sandbox changes" -> "Symphonia is receiving the sandbox patch result."
+      "Releasing sandbox" -> "Symphonia is releasing the sandbox workspace."
+      "Sandbox released" -> "Sandbox workspace released."
+      "Sandbox cleanup needs attention" -> "Sandbox cleanup needs attention."
       "Starting Codex" -> "Codex is working from the task brief."
       "Checking changes" -> "Codex finished its turn and Symphonia is checking the changed files."
       "Running validation" -> "Symphonia is running local validation for the handoff."

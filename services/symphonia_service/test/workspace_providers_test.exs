@@ -56,6 +56,16 @@ defmodule SymphoniaService.WorkspaceProvidersTest do
              "The Coding Assistant can't start because the workspace provider is not supported."
   end
 
+  test "cloud sandbox is not routed through the legacy workspace provider path" do
+    assert {:error, reason} =
+             WorkspaceProviders.resolve(%{}, %{}, %{"kind" => "assignment"}, %{
+               "workspace_provider" => "cloud_sandbox"
+             })
+
+    assert reason ==
+             "The Coding Assistant can't start because the workspace provider is not supported."
+  end
+
   test "Harness daemon assignments always resolve to the local provider" do
     System.put_env("SYMPHONIA_EXPERIMENTAL_SANDBOX_PROVIDER", "1")
     System.put_env("SYMPHONIA_WORKSPACE_PROVIDER", "experimental_sandbox")

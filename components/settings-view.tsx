@@ -465,6 +465,12 @@ interface RemoteExecutionPolicy {
   remoteExecutionAllowed: boolean;
 }
 
+interface SandboxPolicy {
+  sandboxExecutionAllowed: boolean;
+  sandboxProvider?: string | null;
+  sandboxProviderLabel?: string;
+}
+
 async function fetchRemoteExecutionPolicy(repoKey: string): Promise<RemoteExecutionPolicy> {
   const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/remote-execution`, {
     cache: "no-store",
@@ -492,6 +498,31 @@ async function setRemoteExecutionAllowed(
   const payload = (await res.json()) as { policy?: RemoteExecutionPolicy; error?: string };
   if (!res.ok || !payload.policy) {
     throw new Error(payload.error ?? "Could not update remote execution policy");
+  }
+  return payload.policy;
+}
+
+async function fetchSandboxPolicy(repoKey: string): Promise<SandboxPolicy> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/sandbox-policy`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as { policy?: SandboxPolicy; error?: string };
+  if (!res.ok || !payload.policy) {
+    throw new Error(payload.error ?? "Could not load sandbox execution policy");
+  }
+  return payload.policy;
+}
+
+async function setSandboxPolicy(repoKey: string, policy: SandboxPolicy): Promise<SandboxPolicy> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/sandbox-policy`, {
+    method: "POST",
+    cache: "no-store",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(policy),
+  });
+  const payload = (await res.json()) as { policy?: SandboxPolicy; error?: string };
+  if (!res.ok || !payload.policy) {
+    throw new Error(payload.error ?? "Could not update sandbox execution policy");
   }
   return payload.policy;
 }
@@ -754,16 +785,19 @@ function HarnessPanel({
   const [pendingRunnerAction, setPendingRunnerAction] = useState<string | null>(null);
   const [remotePolicy, setRemotePolicy] = useState<RemoteExecutionPolicy | null>(null);
   const [pendingRemotePolicy, setPendingRemotePolicy] = useState(false);
+  const [sandboxPolicy, setSandboxPolicyState] = useState<SandboxPolicy | null>(null);
+  const [pendingSandboxPolicy, setPendingSandboxPolicy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     const refresh = () => {
-      Promise.all([fetchHarnessStatus(), fetchRemoteExecutionPolicy(repoKey)])
-        .then(([nextStatus, nextPolicy]) => {
+      Promise.all([fetchHarnessStatus(), fetchRemoteExecutionPolicy(repoKey), fetchSandboxPolicy(repoKey)])
+        .then(([nextStatus, nextPolicy, nextSandboxPolicy]) => {
           if (cancelled) return;
           setStatus(nextStatus);
           setRemotePolicy(nextPolicy);
+          setSandboxPolicyState(nextSandboxPolicy);
           setError(null);
         })
         .catch((err: unknown) => {
@@ -820,6 +854,24 @@ function HarnessPanel({
       setError(err instanceof Error ? err.message : "Could not update remote execution policy");
     } finally {
       setPendingRemotePolicy(false);
+    }
+  };
+
+  const toggleSandboxPolicy = async () => {
+    setPendingSandboxPolicy(true);
+    setError(null);
+    try {
+      const allowed = !(sandboxPolicy?.sandboxExecutionAllowed ?? false);
+      const nextPolicy = await setSandboxPolicy(repoKey, {
+        sandboxExecutionAllowed: allowed,
+        sandboxProvider: allowed ? (sandboxPolicy?.sandboxProvider ?? "fake_sandbox") : null,
+      });
+      setSandboxPolicyState(nextPolicy);
+      window.dispatchEvent(new CustomEvent("symphonia:readinessUpdated"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update sandbox execution policy");
+    } finally {
+      setPendingSandboxPolicy(false);
     }
   };
 
@@ -918,8 +970,11 @@ function HarnessPanel({
         runners={status?.runners}
         access={access}
         remotePolicy={remotePolicy}
+        sandboxPolicy={sandboxPolicy}
         pendingRemotePolicy={pendingRemotePolicy}
+        pendingSandboxPolicy={pendingSandboxPolicy}
         onToggleRemotePolicy={toggleRemotePolicy}
+        onToggleSandboxPolicy={toggleSandboxPolicy}
         pendingAction={pendingRunnerAction}
         onAction={runRunnerAction}
       />
@@ -1006,23 +1061,31 @@ function RunnerCapacitySection({
   runners,
   access,
   remotePolicy,
+  sandboxPolicy,
   pendingRemotePolicy,
+  pendingSandboxPolicy,
   onToggleRemotePolicy,
+  onToggleSandboxPolicy,
   pendingAction,
   onAction,
 }: {
   runners?: HarnessStatus["runners"];
   access: RepositoryAccess | null;
   remotePolicy: RemoteExecutionPolicy | null;
+  sandboxPolicy: SandboxPolicy | null;
   pendingRemotePolicy: boolean;
+  pendingSandboxPolicy: boolean;
   onToggleRemotePolicy: () => void;
+  onToggleSandboxPolicy: () => void;
   pendingAction: string | null;
   onAction: (runner: RunnerStatusRow, action: "enable" | "disable") => void;
 }) {
   const localService = runners?.localService;
   const remote = runners?.remote ?? [];
   const remoteAllowed = remotePolicy?.remoteExecutionAllowed === true;
+  const sandboxAllowed = sandboxPolicy?.sandboxExecutionAllowed === true;
   const policyDisabledReason = disabledReason(access, "repository.configure");
+  const sandboxDisabledReason = disabledReason(access, "sandbox.configure");
 
   return (
     <div className="border-t px-3 py-3">
@@ -1094,6 +1157,37 @@ function RunnerCapacitySection({
             >
               {remoteAllowed ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
               {pendingRemotePolicy ? "Updating" : remoteAllowed ? "Disable" : "Enable"}
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-[8px] border bg-background/60 p-2.5 text-xs">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 font-medium">
+                <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+                <span>
+                  {sandboxAllowed ? "Sandbox execution enabled" : "Sandbox execution disabled"}
+                </span>
+              </div>
+              <div className="mt-1 text-muted-foreground">
+                Provider: {sandboxPolicy?.sandboxProviderLabel ?? "Not configured"} · Mode: Manual only
+              </div>
+              {sandboxAllowed && (
+                <div className="mt-1 text-muted-foreground">
+                  Symphonia still imports and validates sandbox changes locally before review.
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={pendingSandboxPolicy || !canAccess(access, "sandbox.configure")}
+              title={sandboxDisabledReason}
+              onClick={onToggleSandboxPolicy}
+            >
+              {sandboxAllowed ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+              {pendingSandboxPolicy ? "Updating" : sandboxAllowed ? "Disable" : "Enable"}
             </button>
           </div>
         </div>

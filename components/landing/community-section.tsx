@@ -8,7 +8,7 @@ export function CommunitySection() {
     <section id="community" className="overflow-hidden bg-[var(--landing-cream)] px-5 py-16 md:py-24">
       <div className="mx-auto grid max-w-[1180px] items-center gap-10 md:grid-cols-[0.95fr_1.05fr]">
         <div>
-          <p className="mb-5 text-[14px] font-semibold uppercase text-[var(--landing-orange)]">
+          <p className="mb-5 text-[14px] font-semibold uppercase text-[var(--landing-blue)]">
             Join the community
           </p>
           <h2 className="text-balance text-[42px] font-semibold leading-[1.02] md:text-[64px]">
@@ -20,7 +20,7 @@ export function CommunitySection() {
           </p>
           <Link
             href="/dashboard"
-            className="mt-8 inline-flex h-12 items-center gap-2 rounded-full bg-[var(--landing-orange)] px-6 text-[16px] font-semibold text-white transition hover:bg-[var(--landing-orange-dark)]"
+            className="mt-8 inline-flex h-12 items-center gap-2 rounded-full bg-[var(--landing-blue)] px-6 text-[16px] font-semibold text-white transition hover:bg-[var(--landing-blue-dark)]"
           >
             Connect repository
             <ArrowRight className="h-4 w-4" />

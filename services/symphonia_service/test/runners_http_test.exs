@@ -187,6 +187,54 @@ defmodule SymphoniaService.RunnersHTTPTest do
              AuditLog.list(registry_path, %{"key" => "SYM"}, limit: :all)
   end
 
+  test "sandbox policy route is permission gated and audited", %{
+    port: port,
+    registry_path: registry_path
+  } do
+    default =
+      http_json(
+        port,
+        "GET",
+        "/api/repositories/SYM/sandbox-policy",
+        "",
+        [{"x-symphonia-role", "viewer"}]
+      )
+
+    assert default.status == 200
+    refute default.body["policy"]["sandboxExecutionAllowed"]
+
+    denied =
+      http_json(
+        port,
+        "POST",
+        "/api/repositories/SYM/sandbox-policy",
+        JSON.encode!(%{"sandboxExecutionAllowed" => true, "sandboxProvider" => "fake_sandbox"}),
+        [{"x-symphonia-role", "maintainer"}]
+      )
+
+    assert denied.status == 403
+
+    enabled =
+      http_json(
+        port,
+        "POST",
+        "/api/repositories/SYM/sandbox-policy",
+        JSON.encode!(%{"sandboxExecutionAllowed" => true, "sandboxProvider" => "fake_sandbox"}),
+        [{"x-symphonia-role", "owner"}]
+      )
+
+    assert enabled.status == 200
+    assert enabled.body["policy"]["sandboxExecutionAllowed"]
+    assert enabled.body["policy"]["sandboxProvider"] == "fake_sandbox"
+
+    actions =
+      registry_path
+      |> AuditLog.list(%{"key" => "SYM"}, limit: :all)
+      |> Enum.map(& &1["action"])
+
+    assert "sandbox.policy_enabled" in actions
+  end
+
   defp registration_body(extra_capabilities \\ %{}) do
     JSON.encode!(%{
       "name" => "runner-mac-mini",

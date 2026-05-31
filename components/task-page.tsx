@@ -1083,6 +1083,12 @@ function TaskMeta({
           {run?.executionMode === "remote" && (
             <p>Symphonia validates imported changes locally before review.</p>
           )}
+          {run?.executionMode === "cloud_sandbox" && (
+            <p>
+              Codex ran in an isolated sandbox. Symphonia imported and validated changes locally before review.
+            </p>
+          )}
+          {run?.cleanupWarning && <p>{run.cleanupWarning.message}</p>}
         </div>
       </Section>
       {operationalBadge && (

@@ -23,7 +23,7 @@ export function SiteHeader() {
         </nav>
         <Link
           href="/dashboard"
-          className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--landing-orange)] px-5 text-[15px] font-semibold text-white shadow-[0_10px_24px_rgba(217,111,36,0.24)] transition hover:bg-[var(--landing-orange-dark)]"
+          className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--landing-blue)] px-5 text-[15px] font-semibold text-white shadow-[0_10px_24px_rgba(37,99,235,0.24)] transition hover:bg-[var(--landing-blue-dark)]"
         >
           <Github className="h-4 w-4" />
           Connect repo

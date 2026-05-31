@@ -29,6 +29,8 @@ defmodule SymphoniaService.HTTPServer do
     SelectionPolicy
   }
 
+  alias SymphoniaService.Sandbox.Policy, as: SandboxPolicy
+
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
   end
@@ -256,6 +258,10 @@ defmodule SymphoniaService.HTTPServer do
       ["api", "repositories", repo, "remote-execution"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "policy" => RepositoryPolicy.public(repository)}}
+
+      ["api", "repositories", repo, "sandbox-policy"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, %{"repo" => repository["key"], "policy" => SandboxPolicy.public(repository)}}
 
       ["api", "harness", "daemon"] ->
         Daemon.ensure_started(registry_path)
@@ -883,6 +889,40 @@ defmodule SymphoniaService.HTTPServer do
           end
         )
 
+      ["api", "repositories", repo, "sandbox-policy"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        payload = decode_json(body)
+        allowed? =
+          payload["sandboxExecutionAllowed"] == true or
+            payload["sandbox_execution_allowed"] == true
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "sandbox.configure",
+          repository_target(),
+          fn ->
+            repository = SandboxPolicy.set(registry_path, repo, payload)
+
+            action =
+              if allowed?, do: "sandbox.policy_enabled", else: "sandbox.policy_disabled"
+
+            AuditLog.record(registry_path, repository, %{
+              "actor" => actor,
+              "action" => action,
+              "target" => repository_target(),
+              "result" => "completed",
+              "metadata" => %{
+                "provider" => SandboxPolicy.provider(repository),
+                "workspaceProvider" => "cloud_sandbox"
+              }
+            })
+
+            {200, %{"repo" => repository["key"], "policy" => SandboxPolicy.public(repository)}}
+          end
+        )
+
       ["api", "harness", "daemon", "tick"] ->
         repository = harness_repository(registry_path, path)
 
@@ -978,9 +1018,11 @@ defmodule SymphoniaService.HTTPServer do
         payload = decode_json(body)
 
         permission =
-          if experimental_run?(payload),
-            do: "workspace_provider.experimental_run",
-            else: "task.run_codex"
+          cond do
+            sandbox_execution_requested?(payload) -> "sandbox.run"
+            experimental_run?(payload) -> "workspace_provider.experimental_run"
+            true -> "task.run_codex"
+          end
 
         start_coding_assistant_run(
           registry_path,
@@ -1094,17 +1136,18 @@ defmodule SymphoniaService.HTTPServer do
   defp route(_request, _registry_path, _actor), do: {405, %{"error" => "Method not allowed"}}
 
   defp start_coding_assistant_run(registry_path, actor, repository, task_key, payload, permission) do
-    metadata = %{"taskKey" => task_key, "workspaceProvider" => workspace_provider(payload)}
+    metadata =
+      %{
+        "taskKey" => task_key,
+        "workspaceProvider" => workspace_provider(payload) || execution_workspace_provider(payload),
+        "provider" => "codex_app_server"
+      }
+      |> reject_nil()
 
-    case Policy.authorize(actor, permission, repository, task_target(task_key)) do
+    case authorize_run_start(registry_path, actor, repository, task_key, payload, permission) do
       :ok ->
         with {:ok, runner} <-
-               SelectionPolicy.select_for_run(registry_path, repository, actor,
-                 runner_id: runner_id(payload),
-                 workspace_provider: workspace_provider(payload) || "local_git_worktree",
-                 allow_remote_execution: remote_execution_requested?(payload),
-                 remote_execution: remote_execution_requested?(payload)
-               ) do
+               select_runner_for_payload(registry_path, repository, actor, payload) do
           try do
             result =
               CodingAssistant.start_run(
@@ -1142,6 +1185,17 @@ defmodule SymphoniaService.HTTPServer do
             {status, payload}
         end
 
+      {:error, {status, payload}} ->
+        AuditLog.record(registry_path, repository, %{
+          "actor" => actor,
+          "action" => permission,
+          "target" => task_target(task_key),
+          "result" => "denied",
+          "metadata" => Map.put(metadata, "reasonCode", payload["reasonCode"] || "denied")
+        })
+
+        {status, payload}
+
       {:error, payload} ->
         AuditLog.record(registry_path, repository, %{
           "actor" => actor,
@@ -1152,6 +1206,41 @@ defmodule SymphoniaService.HTTPServer do
         })
 
         {403, payload}
+    end
+  end
+
+  defp authorize_run_start(registry_path, actor, repository, task_key, payload, permission) do
+    with :ok <- Policy.authorize(actor, permission, repository, task_target(task_key)),
+         :ok <- authorize_task_run_codex(actor, repository, task_key, permission),
+         :ok <- authorize_sandbox_run(registry_path, actor, repository, task_key, payload) do
+      :ok
+    end
+  end
+
+  defp authorize_task_run_codex(_actor, _repository, _task_key, "task.run_codex"), do: :ok
+
+  defp authorize_task_run_codex(actor, repository, task_key, _permission),
+    do: Policy.authorize(actor, "task.run_codex", repository, task_target(task_key))
+
+  defp authorize_sandbox_run(registry_path, actor, repository, task_key, payload) do
+    if sandbox_execution_requested?(payload) do
+      task = TaskStore.get_task(repository, task_key)
+      SandboxPolicy.authorize_run(registry_path, repository, actor, task, payload)
+    else
+      :ok
+    end
+  end
+
+  defp select_runner_for_payload(registry_path, repository, actor, payload) do
+    if sandbox_execution_requested?(payload) do
+      {:ok, SymphoniaService.Runner.CloudSandboxProvider.runner_metadata(repository)}
+    else
+      SelectionPolicy.select_for_run(registry_path, repository, actor,
+        runner_id: runner_id(payload),
+        workspace_provider: workspace_provider(payload) || "local_git_worktree",
+        allow_remote_execution: remote_execution_requested?(payload),
+        remote_execution: remote_execution_requested?(payload)
+      )
     end
   end
 
@@ -1326,6 +1415,8 @@ defmodule SymphoniaService.HTTPServer do
 
   defp experimental_run?(payload), do: workspace_provider(payload) == "experimental_sandbox"
 
+  defp sandbox_execution_requested?(payload), do: SandboxPolicy.requested?(payload)
+
   defp runner_id(payload) when is_map(payload), do: payload["runnerId"] || payload["runner_id"]
   defp runner_id(_payload), do: nil
 
@@ -1404,6 +1495,12 @@ defmodule SymphoniaService.HTTPServer do
   end
 
   defp workspace_provider(_payload), do: nil
+
+  defp execution_workspace_provider(payload) when is_map(payload) do
+    if sandbox_execution_requested?(payload), do: "cloud_sandbox", else: nil
+  end
+
+  defp execution_workspace_provider(_payload), do: nil
 
   defp remote_execution_requested?(payload) when is_map(payload) do
     (payload["allowRemoteExecution"] == true or payload["allow_remote_execution"] == true) and
@@ -1501,7 +1598,9 @@ defmodule SymphoniaService.HTTPServer do
       "taskCount" => task_count,
       "github" => RepositoryLink.link(repository),
       "automation" => Automation.status(repository),
-      "remoteExecutionAllowed" => RepositoryPolicy.remote_execution_allowed?(repository)
+      "remoteExecutionAllowed" => RepositoryPolicy.remote_execution_allowed?(repository),
+      "sandboxExecutionAllowed" => SandboxPolicy.allowed?(repository),
+      "sandboxProvider" => SandboxPolicy.provider(repository)
     })
   end
 

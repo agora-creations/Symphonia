@@ -28,7 +28,7 @@ export function HeroSection() {
         <div className="mt-9 flex flex-col items-center gap-4 sm:flex-row">
           <Link
             href="/dashboard"
-            className="inline-flex h-12 items-center gap-2 rounded-full bg-[var(--landing-orange)] px-6 text-[16px] font-semibold text-white shadow-[0_14px_30px_rgba(217,111,36,0.24)] transition hover:-translate-y-0.5 hover:bg-[var(--landing-orange-dark)]"
+            className="inline-flex h-12 items-center gap-2 rounded-full bg-[var(--landing-blue)] px-6 text-[16px] font-semibold text-white shadow-[0_14px_30px_rgba(37,99,235,0.24)] transition hover:-translate-y-0.5 hover:bg-[var(--landing-blue-dark)]"
           >
             Connect repository
             <ArrowRight className="h-4 w-4" />

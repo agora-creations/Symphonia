@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
@@ -24,7 +25,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 const cardShadow =
-  "shadow-[var(--elevation-card)]";
+  "border border-[var(--landing-line)] bg-[var(--landing-paper)] shadow-[0_1px_1px_rgba(37,99,235,0.04)]";
 
 function requestJson<T>(url: string): Promise<T> {
   if (typeof window !== "undefined" && typeof window.fetch === "function") {
@@ -233,20 +234,20 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-svh bg-background text-foreground">
-      <header className="sticky top-0 z-20 flex h-[60px] items-center justify-between border-b bg-sidebar px-5 text-[15px] text-muted-foreground">
-        <Link href="/" className="font-serif text-[28px] font-black tracking-[-0.06em] text-foreground">
-          symphonia*
-        </Link>
-        <div className="flex items-center gap-3">
+    <div className="landing-page min-h-svh bg-[var(--landing-cream)] text-[var(--landing-ink)]">
+      <header className="sticky top-0 z-20 border-b border-[var(--landing-line)] bg-[var(--landing-paper)]/92 backdrop-blur-md">
+        <div className="mx-auto flex h-[72px] max-w-[1180px] items-center justify-between gap-4 px-5 text-[15px] text-[var(--landing-muted)]">
+          <Link href="/" className="font-serif text-[30px] font-semibold leading-none text-[var(--landing-ink)]">
+            Symphonia
+          </Link>
           <div className="relative hidden sm:block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--landing-muted)]" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search repositories"
               aria-label="Search repositories"
-              className="h-9 w-56 rounded-[8px] border bg-background pl-9 pr-3 text-[14px] text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/20"
+              className="h-10 w-64 rounded-full border border-[var(--landing-line)] bg-[var(--landing-cream)] pl-9 pr-3 text-[14px] text-[var(--landing-ink)] outline-none transition focus:border-[var(--landing-blue)] focus:ring-2 focus:ring-[rgba(37,99,235,0.16)]"
             />
           </div>
           <button
@@ -254,8 +255,8 @@ export default function DashboardPage() {
             disabled={!connectHref}
             title={!connectHref ? "GitHub connection is unavailable" : "Connect repo"}
             className={cn(
-              "inline-flex h-9 items-center gap-2 rounded-[8px] bg-primary px-4 text-[15px] font-medium text-primary-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] transition hover:bg-primary-hover",
-              !connectHref && "cursor-not-allowed opacity-55 hover:bg-primary",
+              "inline-flex h-11 items-center gap-2 rounded-full bg-[var(--landing-blue)] px-5 text-[15px] font-semibold text-white shadow-[0_10px_24px_rgba(37,99,235,0.24)] transition hover:bg-[var(--landing-blue-dark)]",
+              !connectHref && "cursor-not-allowed opacity-55 hover:bg-[var(--landing-blue)]",
             )}
           >
             <Github className="h-4 w-4" />
@@ -264,20 +265,16 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[976px] px-5 py-10 md:py-14">
-        <section className="relative overflow-hidden rounded-[10px] bg-[var(--warm-bg)] px-6 py-10 text-foreground shadow-[0_18px_60px_rgba(0,0,0,0.28)] md:px-10 md:py-12">
-          <div className="absolute left-8 top-8 h-1.5 w-24 rotate-[-3deg] rounded-full bg-brand-accent shadow-[0_0_18px_rgba(248,28,229,0.62)]" />
-          <div className="absolute right-12 top-16 hidden rounded-[50%] border-[4px] border-muted-foreground/55 px-6 py-3 text-[28px] font-bold italic tracking-[-0.06em] text-muted-foreground/55 md:block">
-            ship
-          </div>
-          <div className="relative max-w-2xl">
-            <p className="text-[13px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+      <main className="mx-auto max-w-[1180px] px-5 py-10 md:py-14">
+        <section className="grid items-center gap-8 border-b border-[var(--landing-line)] pb-10 md:grid-cols-[0.94fr_1.06fr] md:pb-14">
+          <div className="relative">
+            <p className="text-[13px] font-semibold uppercase text-[var(--landing-blue)]">
               Repository dashboard
             </p>
-            <h1 className="mt-4 text-balance text-[42px] font-bold leading-[1] tracking-[-0.045em] md:text-[58px]">
+            <h1 className="mt-4 text-balance text-[44px] font-semibold leading-[0.98] text-[var(--landing-ink)] md:text-[68px]">
               Connect a repo. Clarise creates the workspace files.
             </h1>
-            <p className="mt-4 max-w-xl text-[17px] leading-7 text-muted-foreground">
+            <p className="mt-5 max-w-xl text-[18px] leading-8 text-[var(--landing-muted)]">
               After a repository opens, use Clarise to create your private workspace:
               milestones, requirements, plans, decisions, and task briefs.
             </p>
@@ -286,8 +283,8 @@ export default function DashboardPage() {
                 onClick={openGitHubConnection}
                 disabled={!connectHref}
                 className={cn(
-                  "inline-flex h-10 items-center gap-2 rounded-[8px] bg-primary px-4 text-[15px] font-semibold text-primary-foreground transition hover:bg-primary-hover",
-                  !connectHref && "cursor-not-allowed opacity-55 hover:bg-primary",
+                  "inline-flex h-12 items-center gap-2 rounded-full bg-[var(--landing-blue)] px-6 text-[16px] font-semibold text-white shadow-[0_14px_30px_rgba(37,99,235,0.24)] transition hover:-translate-y-0.5 hover:bg-[var(--landing-blue-dark)]",
+                  !connectHref && "cursor-not-allowed opacity-55 hover:bg-[var(--landing-blue)]",
                 )}
               >
                 Connect to GitHub
@@ -295,44 +292,55 @@ export default function DashboardPage() {
               </button>
             </div>
           </div>
+          <div className="rounded-[8px] border border-[var(--landing-line)] bg-[var(--landing-paper)]">
+            <Image
+              src="/images/device-stack.png"
+              alt="Minimal line illustration of repository workspaces across devices."
+              width={1376}
+              height={768}
+              priority
+              className="h-auto w-full"
+              sizes="(max-width: 768px) 94vw, 560px"
+            />
+          </div>
         </section>
 
         <div className="mt-8 sm:hidden">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--landing-muted)]" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search repositories"
               aria-label="Search repositories"
-              className="h-10 w-full rounded-[8px] border bg-background pl-9 pr-3 text-[14px] text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/20"
+              className="h-11 w-full rounded-full border border-[var(--landing-line)] bg-[var(--landing-paper)] pl-9 pr-3 text-[14px] text-[var(--landing-ink)] outline-none transition focus:border-[var(--landing-blue)] focus:ring-2 focus:ring-[rgba(37,99,235,0.16)]"
             />
           </div>
         </div>
 
         {notice && (
-          <div className="mt-6 flex items-center gap-2 rounded-[10px] border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-[14px] text-emerald-300">
+          <div className="mt-6 flex items-center gap-2 rounded-[8px] border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-[14px] text-emerald-700">
             <Check className="h-4 w-4" />
             {notice}
           </div>
         )}
 
         {error && (
-          <div className="mt-6 rounded-[10px] border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[14px] text-amber-300">
+          <div className="mt-6 rounded-[8px] border border-[rgba(37,99,235,0.24)] bg-[rgba(37,99,235,0.08)] px-4 py-3 text-[14px] text-[var(--landing-blue-dark)]">
             {error}
           </div>
         )}
 
         <div className="mt-10 flex items-end justify-between gap-4">
           <div>
-            <p className="text-[13px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            <p className="text-[13px] font-semibold uppercase text-[var(--landing-blue)]">
               Workspaces
             </p>
-            <h2 className="mt-2 text-[34px] font-bold leading-none tracking-[-0.045em] text-foreground">
+            <h2 className="mt-2 text-[34px] font-semibold leading-none text-[var(--landing-ink)]">
               Repositories
             </h2>
           </div>
-          <span className="rounded-full border bg-card px-3 py-1 text-[13px] font-medium text-muted-foreground">
+          <span className="rounded-full border border-[var(--landing-line)] bg-[var(--landing-paper)] px-3 py-1 text-[13px] font-medium text-[var(--landing-muted)]">
             {connectedCount} connected
           </span>
         </div>
@@ -340,7 +348,7 @@ export default function DashboardPage() {
         {loading ? (
           <div
             className={cn(
-              "mt-6 rounded-[10px] border border-dashed bg-card p-10 text-center text-[15px] text-muted-foreground",
+              "mt-6 rounded-[8px] border-dashed p-10 text-center text-[15px] text-[var(--landing-muted)]",
               cardShadow,
             )}
           >
@@ -396,7 +404,7 @@ export default function DashboardPage() {
         title={pendingRemoval ? `Remove ${pendingRemoval.name}?` : "Remove repository"}
         description={
           <>
-            This removes <span className="font-medium text-foreground">{pendingRemoval?.name}</span>{" "}
+            This removes <span className="font-medium text-[var(--landing-ink)]">{pendingRemoval?.name}</span>{" "}
             from Symphonia. Your GitHub repository and local files won&apos;t be affected.
           </>
         }
@@ -420,24 +428,24 @@ function EmptyRepositoryState({
   return (
     <div
       className={cn(
-        "mt-6 rounded-[10px] bg-card p-8 text-center md:p-10",
+        "mt-6 rounded-[8px] p-8 text-center md:p-10",
         cardShadow,
       )}
     >
-      <div className="mx-auto grid h-14 w-14 place-items-center rounded-[10px] bg-[var(--card-alt)] text-primary">
+      <div className="mx-auto grid h-14 w-14 place-items-center rounded-[8px] bg-[var(--landing-soft)] text-[var(--landing-blue)]">
         <FolderGit2 className="h-7 w-7" />
       </div>
-      <h3 className="mt-5 text-[28px] font-bold tracking-[-0.04em] text-foreground">
+      <h3 className="mt-5 text-[28px] font-semibold text-[var(--landing-ink)]">
         {connectedCount > 0 ? "No matching repositories" : "No repositories connected yet"}
       </h3>
-      <p className="mx-auto mt-3 max-w-md text-[15px] leading-6 text-muted-foreground">
+      <p className="mx-auto mt-3 max-w-md text-[15px] leading-6 text-[var(--landing-muted)]">
         Connect GitHub to bring your repositories into Symphonia. Once a repo is opened,
         Clarise becomes the first stop for creating the editable workspace files.
       </p>
       <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
         <button
           onClick={onConnect}
-          className="inline-flex h-10 items-center gap-2 rounded-[8px] bg-primary px-4 text-[15px] font-semibold text-primary-foreground transition hover:bg-primary-hover"
+          className="inline-flex h-10 items-center gap-2 rounded-full bg-[var(--landing-blue)] px-4 text-[15px] font-semibold text-white transition hover:bg-[var(--landing-blue-dark)]"
         >
           <Github className="h-4 w-4" />
           Connect to GitHub
@@ -445,7 +453,7 @@ function EmptyRepositoryState({
         <button
           disabled
           title="Coming soon - demo repositories are on the way."
-          className="inline-flex h-10 cursor-not-allowed items-center gap-2 rounded-[8px] border bg-card px-4 text-[15px] font-medium text-muted-foreground"
+          className="inline-flex h-10 cursor-not-allowed items-center gap-2 rounded-full border border-[var(--landing-line)] bg-[var(--landing-paper)] px-4 text-[15px] font-medium text-[var(--landing-muted)]"
         >
           <Sparkles className="h-4 w-4" />
           Demo repository
@@ -458,8 +466,8 @@ function EmptyRepositoryState({
 function SectionHeader({ title, count }: { title: string; count: number }) {
   return (
     <div className="flex items-center justify-between">
-      <h3 className="text-[17px] font-bold tracking-[-0.025em] text-foreground">{title}</h3>
-      <span className="text-[13px] tabular-nums text-muted-foreground">{count}</span>
+      <h3 className="text-[17px] font-semibold text-[var(--landing-ink)]">{title}</h3>
+      <span className="text-[13px] tabular-nums text-[var(--landing-muted)]">{count}</span>
     </div>
   );
 }
@@ -494,25 +502,25 @@ function GitHubRepositoryCard({
       onClick={openWorkspace}
       onKeyDown={openFromKeyboard}
       className={cn(
-        "group cursor-pointer rounded-[10px] bg-card p-5 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-[var(--elevation-card-hover)] focus:outline-none focus:ring-2 focus:ring-ring/30",
+        "group cursor-pointer rounded-[8px] p-5 text-left transition duration-200 hover:-translate-y-0.5 hover:border-[var(--landing-blue)] focus:outline-none focus:ring-2 focus:ring-[rgba(37,99,235,0.18)]",
         cardShadow,
         opening && "cursor-wait opacity-75",
       )}
     >
       <div className="flex items-center gap-3">
-        <span className="grid h-11 w-11 place-items-center rounded-[9px] bg-[var(--card-alt)] text-primary">
+        <span className="grid h-11 w-11 place-items-center rounded-[8px] bg-[var(--landing-soft)] text-[var(--landing-blue)]">
           <Github className="h-5 w-5" />
         </span>
         <div className="min-w-0 flex-1">
-          <h4 className="truncate text-[17px] font-bold tracking-[-0.025em] text-foreground">
+          <h4 className="truncate text-[17px] font-semibold text-[var(--landing-ink)]">
             {fullName}
           </h4>
-          <p className="truncate text-[13px] text-muted-foreground">
+          <p className="truncate text-[13px] text-[var(--landing-muted)]">
             Open in Clarise to create workspace files
             {repository.defaultBranch ? ` / ${repository.defaultBranch}` : ""}
           </p>
         </div>
-        <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+        <ChevronRight className="h-5 w-5 shrink-0 text-[var(--landing-muted)] transition-colors group-hover:text-[var(--landing-ink)]" />
       </div>
 
       <dl className="mt-5 grid grid-cols-3 gap-2 text-center">
@@ -522,7 +530,7 @@ function GitHubRepositoryCard({
       </dl>
 
       <div className="mt-4 flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1 text-[13px] font-medium text-primary">
+        <span className="inline-flex items-center gap-1 text-[13px] font-medium text-[var(--landing-blue)]">
           {opening ? "Opening Clarise..." : "Open Clarise"}
           <ArrowRight className="h-3.5 w-3.5" />
         </span>
@@ -534,7 +542,7 @@ function GitHubRepositoryCard({
               rel="noreferrer"
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}
-              className="inline-flex items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-1 text-[13px] text-[var(--landing-muted)] hover:text-[var(--landing-ink)]"
             >
               GitHub
               <ExternalLink className="h-3.5 w-3.5" />
@@ -545,7 +553,7 @@ function GitHubRepositoryCard({
               href={manageUrl}
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}
-              className="inline-flex items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-1 text-[13px] text-[var(--landing-muted)] hover:text-[var(--landing-ink)]"
             >
               Repos
               <ExternalLink className="h-3.5 w-3.5" />
@@ -575,40 +583,37 @@ function RepositoryCard({
   return (
     <div
       className={cn(
-        "group relative rounded-[10px] bg-card p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-[var(--elevation-card-hover)]",
+        "group relative rounded-[8px] p-5 transition duration-200 hover:-translate-y-0.5 hover:border-[var(--landing-blue)]",
         cardShadow,
       )}
     >
       <Link
         href={href}
         aria-label={`Open ${repository.name} repository`}
-        className="absolute inset-0 z-10 rounded-[10px] focus:outline-none focus:ring-2 focus:ring-ring/30"
+        className="absolute inset-0 z-10 rounded-[8px] focus:outline-none focus:ring-2 focus:ring-[rgba(37,99,235,0.18)]"
       />
       <div className="flex items-center gap-3">
         <span
-          className={cn(
-            "grid h-11 w-11 shrink-0 place-items-center rounded-[9px] bg-[var(--card-alt)] text-[15px] font-bold",
-            colorForRepo(repository.key),
-          )}
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] bg-[var(--landing-soft)] text-[15px] font-semibold text-[var(--landing-blue)]"
         >
           {repository.key[0]}
         </span>
         <div className="min-w-0 flex-1">
-          <h4 className="truncate text-[17px] font-bold tracking-[-0.025em] text-foreground">
+          <h4 className="truncate text-[17px] font-semibold text-[var(--landing-ink)]">
             {repository.name}
           </h4>
-          <p className="truncate text-[13px] text-muted-foreground">
+          <p className="truncate text-[13px] text-[var(--landing-muted)]">
             {repository.github?.owner && repository.github?.name
               ? `${repository.github.owner}/${repository.github.name}`
               : "Local repository"}
           </p>
-          <p className="mt-1 truncate text-[12px] text-muted-foreground">
+          <p className="mt-1 truncate text-[12px] text-[var(--landing-muted)]">
             {workspaceReady
               ? "Workspace files are ready to edit"
               : "Use Clarise to create workspace files"}
           </p>
         </div>
-        <ChevronRight className="h-5 w-5 text-muted-foreground transition-colors group-hover:text-foreground" />
+        <ChevronRight className="h-5 w-5 text-[var(--landing-muted)] transition-colors group-hover:text-[var(--landing-ink)]" />
       </div>
 
       <dl className="mt-5 grid grid-cols-3 gap-2 text-center">
@@ -618,7 +623,7 @@ function RepositoryCard({
       </dl>
 
       <div className="mt-4 flex items-center justify-between gap-3">
-        <span className="inline-flex items-center gap-1 text-[13px] font-medium text-primary">
+        <span className="inline-flex items-center gap-1 text-[13px] font-medium text-[var(--landing-blue)]">
           {workspaceReady ? "Open repo" : "Open Clarise"}
           <ArrowRight className="h-3.5 w-3.5" />
         </span>
@@ -626,7 +631,7 @@ function RepositoryCard({
           type="button"
           onClick={() => onRemove(repository)}
           disabled={removing}
-          className="relative z-20 inline-flex h-8 shrink-0 items-center gap-1 rounded-[8px] border px-3 text-[12px] font-medium text-muted-foreground transition hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+          className="relative z-20 inline-flex h-8 shrink-0 items-center gap-1 rounded-full border border-[var(--landing-line)] px-3 text-[12px] font-medium text-[var(--landing-muted)] transition hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={`Remove ${repository.name} from Symphonia`}
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -639,18 +644,13 @@ function RepositoryCard({
 
 function Stat({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
   return (
-    <div className="rounded-[8px] bg-[var(--card-alt)] px-2 py-2">
-      <dt className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+    <div className="rounded-[8px] bg-[var(--landing-soft)] px-2 py-2">
+      <dt className="text-[10px] font-semibold uppercase text-[var(--landing-muted)]">
         {label}
       </dt>
-      <dd className={cn("truncate text-[14px] font-bold tabular-nums text-foreground", muted && "text-amber-300")}>
+      <dd className={cn("truncate text-[14px] font-semibold tabular-nums text-[var(--landing-ink)]", muted && "text-[var(--landing-blue)]")}>
         {value}
       </dd>
     </div>
   );
-}
-
-function colorForRepo(key: string): string {
-  const colors = ["text-red-400", "text-primary", "text-violet-400", "text-emerald-400"];
-  return colors[key.charCodeAt(0) % colors.length] ?? colors[0];
 }

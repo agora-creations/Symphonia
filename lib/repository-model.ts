@@ -126,6 +126,8 @@ export interface RepositorySummary {
   github?: GitHubRepositoryLink | null;
   automation?: RepositoryAutomationState | null;
   remoteExecutionAllowed?: boolean;
+  sandboxExecutionAllowed?: boolean;
+  sandboxProvider?: string | null;
   last_task_number?: number;
   lastTaskNumber?: number;
   taskCount?: number;
@@ -267,6 +269,7 @@ export type RepositoryReadinessCategory =
   | "automation"
   | "provider"
   | "runner"
+  | "sandbox"
   | "validation"
   | "github"
   | "review";

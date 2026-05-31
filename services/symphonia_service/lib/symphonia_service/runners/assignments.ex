@@ -56,6 +56,42 @@ defmodule SymphoniaService.Runners.Assignments do
     {:ok, assignment}
   end
 
+  def create_sandbox_for_run(registry_path, repository, task, run, runner, actor, params \\ %{}) do
+    preflight(repository, task)
+
+    base_branch = base_branch(repository)
+    base_sha = current_head_sha!(repository["path"])
+    head_branch = BranchManager.task_branch(task)
+
+    assignment =
+      AssignmentStore.create(registry_path, %{
+        "run_id" => run["id"],
+        "repo_key" => repository["key"],
+        "task_key" => task["key"],
+        "runner_id" => runner["id"],
+        "runner_mode" => "cloud_sandbox",
+        "runner" => runner,
+        "state" => "queued",
+        "provider" => "codex_app_server",
+        "workspace_provider" => "cloud_sandbox",
+        "base_branch" => base_branch,
+        "base_sha" => base_sha,
+        "repository" => repository_payload(repository, base_branch, base_sha),
+        "context_pack" => public_context_pack(repository, task, base_branch, head_branch),
+        "params" => sandbox_params(params)
+      })
+
+    audit(registry_path, repository, actor, "sandbox.run_selected", assignment, "completed",
+      workspaceProvider: "cloud_sandbox"
+    )
+
+    audit(registry_path, repository, actor, "runner.assignment_created", assignment, "completed",
+      workspaceProvider: "cloud_sandbox"
+    )
+
+    {:ok, assignment}
+  end
+
   def claim(registry_path, runner_id, token) do
     with {:ok, _runner} <- authenticate_runner(registry_path, runner_id),
          {:ok, _runner} <- Registry.authenticate(registry_path, runner_id, token) do
@@ -137,6 +173,50 @@ defmodule SymphoniaService.Runners.Assignments do
     else
       nil -> {:error, :not_found}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def submit_sandbox_result(registry_path, assignment_id, result, actor \\ Actor.default()) do
+    with assignment when is_map(assignment) <- AssignmentStore.get(registry_path, assignment_id),
+         {:ok, patch} <- PatchBundle.validate(result, assignment),
+         :ok <- require_result_allowed(assignment, patch["patch_digest"]) do
+      case assignment["state"] do
+        state when state in ["result_received", "importing", "completed"] ->
+          {:ok, assignment, :idempotent}
+
+        _state ->
+          {:ok, assignment} = maybe_mark_running(registry_path, assignment)
+          receive_and_import(registry_path, assignment, result, patch, actor)
+      end
+    else
+      nil -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def fail_sandbox_assignment(registry_path, assignment_id, failure_class, public_message) do
+    case AssignmentStore.get(registry_path, assignment_id) do
+      nil ->
+        {:error, :not_found}
+
+      assignment ->
+        if AssignmentStore.terminal?(assignment) do
+          {:ok, assignment, :idempotent}
+        else
+          {:ok, failed} =
+            AssignmentStore.transition(registry_path, assignment_id, "failed", %{
+              "failure_class" => failure_class,
+              "public_message" => public_message,
+              "result_digest" => RemoteResult.failure_digest(%{
+                "failureClass" => failure_class,
+                "publicMessage" => public_message
+              })
+            })
+
+          fail_run_for_assignment(registry_path, failed, failure_class, public_message)
+          audit_for_assignment(registry_path, failed, "runner.assignment_import_failed", "failed")
+          {:ok, failed, :failed}
+        end
     end
   end
 
@@ -248,7 +328,7 @@ defmodule SymphoniaService.Runners.Assignments do
   def public_response(nil), do: %{"assignment" => nil}
   def public_response(assignment), do: %{"assignment" => AssignmentStore.public(assignment)}
 
-  defp receive_and_import(registry_path, assignment, result, patch) do
+  defp receive_and_import(registry_path, assignment, result, patch, _actor \\ Actor.default()) do
     {:ok, received} =
       AssignmentStore.transition(registry_path, assignment["id"], "result_received", %{
         "result_digest" => patch["patch_digest"],
@@ -449,6 +529,7 @@ defmodule SymphoniaService.Runners.Assignments do
       "workspace_provider" => run["workspace_provider"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],
+      "cleanup_warning" => run["cleanup_warning"],
       "retry_at" => run["retry_at"],
       "failure_class" => run["failure_class"],
       "attempt" => run["attempt"],
@@ -459,6 +540,24 @@ defmodule SymphoniaService.Runners.Assignments do
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
     |> Map.new()
   end
+
+  defp sandbox_params(params) when is_map(params) do
+    params
+    |> Map.take([
+      "fakeSandboxFailure",
+      "fake_sandbox_failure",
+      "fakeSandboxEventsPath",
+      "fake_sandbox_events_path",
+      "fakePatchPath",
+      "fake_patch_path",
+      "fakePatchBody",
+      "fake_patch_body"
+    ])
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp sandbox_params(_params), do: %{}
 
   defp public_context_pack(repository, task, base_branch, head_branch) do
     context = %{
@@ -577,11 +676,12 @@ defmodule SymphoniaService.Runners.Assignments do
     metadata =
       %{
         "runnerId" => assignment["runner_id"],
-        "runnerMode" => "remote_runner",
+        "runnerMode" => assignment["runner_mode"] || "remote_runner",
         "assignmentId" => assignment["id"],
         "runId" => assignment["run_id"],
         "taskKey" => assignment["task_key"],
         "provider" => assignment["provider"],
+        "workspaceProvider" => extra[:workspaceProvider] || assignment["workspace_provider"],
         "reasonCode" => extra[:reasonCode] || assignment["failure_class"],
         "changedFileCount" => extra[:changedFileCount]
       }

@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Menu, Settings, X } from "lucide-react";
+import { Menu, Moon, Settings, Sun, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SidebarBody } from "@/components/sidebar/sidebar-body";
+import { useTheme } from "@/components/theme-provider";
 import type { RepositorySummary } from "@/lib/repository-model";
 
 interface Props {
@@ -147,8 +148,11 @@ export function AppSidebar({ repoKey }: Props) {
 
 function SidebarFooter({ repoKey }: { repoKey: string }) {
   const pathname = usePathname();
+  const { theme, toggle } = useTheme();
   const settingsHref = `/r/${repoKey.toLowerCase()}/settings`;
   const settingsActive = pathname === settingsHref;
+  const themeToggleLabel = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+  const ThemeIcon = theme === "dark" ? Sun : Moon;
 
   return (
     <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
@@ -163,17 +167,28 @@ function SidebarFooter({ repoKey }: { repoKey: string }) {
         </span>
         <span className="truncate text-sm">Ava Martinez</span>
       </button>
-      <Link
-        href={settingsHref}
-        aria-label="Settings"
-        title="Settings"
-        className={cn(
-          "grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground",
-          settingsActive && "bg-sidebar-accent text-sidebar-accent-foreground",
-        )}
-      >
-        <Settings className="h-3.5 w-3.5" />
-      </Link>
+      <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={themeToggleLabel}
+          title={themeToggleLabel}
+          className="grid h-8 w-8 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+        >
+          <ThemeIcon className="h-3.5 w-3.5" />
+        </button>
+        <Link
+          href={settingsHref}
+          aria-label="Settings"
+          title="Settings"
+          className={cn(
+            "grid h-8 w-8 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground",
+            settingsActive && "bg-sidebar-accent text-sidebar-accent-foreground",
+          )}
+        >
+          <Settings className="h-3.5 w-3.5" />
+        </Link>
+      </div>
     </div>
   );
 }

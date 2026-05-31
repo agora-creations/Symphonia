@@ -32,7 +32,7 @@ defmodule SymphoniaService.Runners.PatchImporter do
         run
         |> RunStore.update_metadata(%{
           "workspace_path" => context.repo_path,
-          "workspace_provider" => "local_git_worktree",
+          "workspace_provider" => import_workspace_provider(run),
           "review_branch" => context.head_branch
         })
         |> RunStore.mark_step("Importing returned patch")
@@ -98,6 +98,10 @@ defmodule SymphoniaService.Runners.PatchImporter do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp import_workspace_provider(%{"execution_mode" => "cloud_sandbox"}), do: "cloud_sandbox"
+  defp import_workspace_provider(%{"workspace_provider" => "cloud_sandbox"}), do: "cloud_sandbox"
+  defp import_workspace_provider(_run), do: "local_git_worktree"
 
   defp apply_patch(repo_path, assignment_id, diff) do
     patch_path = temp_patch_path(assignment_id)

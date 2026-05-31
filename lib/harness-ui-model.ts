@@ -44,6 +44,7 @@ export interface CompactRunBadge {
   label:
     | "Working"
     | "Running on runner"
+    | "Running in sandbox"
     | "Importing patch"
     | "Validating changes"
     | "Checking changes"
@@ -144,6 +145,8 @@ export function runOriginLabel(run?: CodingAssistantRun | null): string {
 
 export function workspaceProviderLabel(run?: CodingAssistantRun | null): string {
   switch (run?.workspaceProvider) {
+    case "cloud_sandbox":
+      return "Cloud sandbox";
     case "experimental_sandbox":
       return "Experimental sandbox";
     case "local_git_worktree":
@@ -155,6 +158,10 @@ export function workspaceProviderLabel(run?: CodingAssistantRun | null): string 
 }
 
 export function executionModeLabel(run?: CodingAssistantRun | null): string {
+  if (run?.executionMode === "cloud_sandbox" || run?.workspaceProvider === "cloud_sandbox") {
+    return "Cloud sandbox";
+  }
+
   return run?.executionMode === "remote" || run?.runner?.mode === "remote_runner"
     ? "Remote"
     : "Local";
@@ -172,6 +179,9 @@ export function compactRunBadge(run?: CodingAssistantRun | null): CompactRunBadg
   if (run.state === "canceled") return { label: "Canceled", tone: "warning" };
 
   const step = run.displayStep ?? run.currentStep ?? "";
+  if (step.includes("sandbox") || step.includes("Sandbox")) {
+    return { label: "Running in sandbox", tone: "neutral" };
+  }
   if (step.includes("runner") || step.includes("Runner")) {
     return { label: "Running on runner", tone: "neutral" };
   }

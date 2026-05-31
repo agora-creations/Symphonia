@@ -24,6 +24,8 @@ defmodule SymphoniaService.Access.Permission do
     "pull_request.open",
     "pull_request.refresh",
     "provider.configure",
+    "sandbox.configure",
+    "sandbox.run",
     "workspace_provider.experimental_run",
     "runner.view",
     "runner.register",
@@ -39,6 +41,7 @@ defmodule SymphoniaService.Access.Permission do
         @permissions --
           [
             "workspace_provider.experimental_run",
+            "sandbox.configure",
             "runner.register",
             "runner.enable",
             "runner.disable"
@@ -88,6 +91,8 @@ defmodule SymphoniaService.Access.Permission do
     "pull_request.open" => "open pull requests",
     "pull_request.refresh" => "refresh pull request status",
     "provider.configure" => "configure providers",
+    "sandbox.configure" => "configure sandbox execution",
+    "sandbox.run" => "run sandbox execution",
     "workspace_provider.experimental_run" => "run experimental sandbox workspaces",
     "runner.view" => "view runners",
     "runner.register" => "register runners",
@@ -116,6 +121,10 @@ defmodule SymphoniaService.Access.Permission do
       "You do not have permission to disable automation for this repository.",
     "workspace_provider.experimental_run" =>
       "You do not have permission to run experimental sandbox workspaces for this repository.",
+    "sandbox.configure" =>
+      "You do not have permission to configure sandbox execution for this repository.",
+    "sandbox.run" =>
+      "You do not have permission to run sandbox execution for this repository.",
     "runner.register" => "You do not have permission to register runners for this repository.",
     "runner.enable" => "You do not have permission to enable runners for this repository.",
     "runner.disable" => "You do not have permission to disable runners for this repository.",

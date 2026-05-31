@@ -47,6 +47,46 @@
   color-scheme: dark;
 }
 
+.light {
+  color-scheme: light;
+  --card: oklch(0.99 0.004 250);
+  --card-foreground: oklch(0.18 0.018 250);
+  --popover: oklch(0.99 0.004 250);
+  --popover-foreground: oklch(0.18 0.018 250);
+  --primary: oklch(0.5 0.18 250);
+  --primary-hover: oklch(0.44 0.18 250);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.94 0.01 250);
+  --secondary-foreground: oklch(0.22 0.018 250);
+  --muted: oklch(0.93 0.01 250);
+  --muted-foreground: oklch(0.46 0.02 250);
+  --accent: oklch(0.91 0.02 250);
+  --accent-foreground: oklch(0.2 0.025 250);
+  --destructive: oklch(0.58 0.22 25);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.84 0.012 250);
+  --input: oklch(0.78 0.014 250);
+  --ring: oklch(0.5 0.18 250);
+  --sidebar: oklch(0.965 0.007 250);
+  --sidebar-foreground: oklch(0.2 0.018 250);
+  --sidebar-primary: oklch(0.5 0.18 250);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.9 0.018 250);
+  --sidebar-accent-foreground: oklch(0.18 0.018 250);
+  --sidebar-border: oklch(0.82 0.014 250);
+  --sidebar-ring: oklch(0.5 0.18 250);
+  --background: oklch(0.975 0.006 250);
+  --foreground: oklch(0.16 0.018 250);
+  --card-alt: oklch(0.945 0.01 250);
+  --warm-bg: oklch(0.94 0.012 250);
+  --brand-accent: oklch(0.58 0.2 205);
+  --brand-accent-soft: oklch(0.58 0.2 205 / 0.12);
+  --brand-accent-text: oklch(0.42 0.16 205);
+  --elevation-card: 0 1px 1px rgba(18, 27, 43, 0.06), 0 0 0 1px rgba(18, 27, 43, 0.08), 0 12px 32px rgba(18, 27, 43, 0.08);
+  --elevation-card-hover: 0 1px 1px rgba(18, 27, 43, 0.08), 0 0 0 1px rgba(18, 27, 43, 0.1), 0 18px 44px rgba(18, 27, 43, 0.12);
+  --elevation-dialog: 0 0 0 1px rgba(18, 27, 43, 0.1), 0 22px 70px rgba(18, 27, 43, 0.18);
+}
+
 .landing-page {
   --landing-cream: #faf9f6;
   --landing-paper: #ffffff;
@@ -54,8 +94,8 @@
   --landing-ink: #25211b;
   --landing-muted: #766f64;
   --landing-line: #e7e1d7;
-  --landing-orange: #df7832;
-  --landing-orange-dark: #b95618;
+  --landing-blue: #2563eb;
+  --landing-blue-dark: #1d4ed8;
 }
 
 @theme inline {

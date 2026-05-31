@@ -30,6 +30,8 @@ export type PermissionKey =
   | "pull_request.open"
   | "pull_request.refresh"
   | "provider.configure"
+  | "sandbox.configure"
+  | "sandbox.run"
   | "workspace_provider.experimental_run"
   | "runner.view"
   | "runner.register"
@@ -91,6 +93,8 @@ const ROLE_PERMISSIONS: Record<RepositoryRole, PermissionKey[]> = {
     "pull_request.open",
     "pull_request.refresh",
     "provider.configure",
+    "sandbox.configure",
+    "sandbox.run",
     "workspace_provider.experimental_run",
     "runner.view",
     "runner.register",
@@ -119,6 +123,7 @@ const ROLE_PERMISSIONS: Record<RepositoryRole, PermissionKey[]> = {
     "pull_request.open",
     "pull_request.refresh",
     "provider.configure",
+    "sandbox.run",
     "runner.view",
     "runner.use_remote",
   ],
@@ -207,6 +212,12 @@ export function disabledReason(
   }
   if (permission === "runner.use_remote") {
     return "Only maintainers and owners can use remote runners when repository policy allows it.";
+  }
+  if (permission === "sandbox.configure") {
+    return "Only owners can configure sandbox execution.";
+  }
+  if (permission === "sandbox.run") {
+    return "Only maintainers and owners can run sandbox execution when repository policy allows it.";
   }
 
   return "You do not have permission for this action.";

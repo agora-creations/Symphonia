@@ -13,10 +13,12 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
   alias SymphoniaService.Readiness.RepositoryScanner
   alias SymphoniaService.Runners.Registry, as: RunnerRegistry
   alias SymphoniaService.Runner.WorkspaceProviders
-  alias SymphoniaService.Validation.Policy
+  alias SymphoniaService.Sandbox.Policy, as: SandboxPolicy
+  alias SymphoniaService.Sandbox.Registry, as: SandboxRegistry
+  alias SymphoniaService.Validation.Policy, as: ValidationPolicy
   alias SymphoniaService.{SpecWorkspace, TaskStore, Workspace}
 
-  @categories ~w(workspace planning automation provider runner validation github review)
+  @categories ~w(workspace planning automation provider runner sandbox validation github review)
 
   def get(repository, opts \\ []) do
     registry_path = Keyword.get(opts, :registry_path, SymphoniaService.default_registry_path())
@@ -28,6 +30,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
       |> Kernel.++(automation_checks(repository, registry_path))
       |> Kernel.++(provider_checks())
       |> Kernel.++(runner_checks(repository, registry_path))
+      |> Kernel.++(sandbox_checks(repository))
       |> Kernel.++(validation_checks(repository))
       |> Kernel.++(github_checks(repository))
       |> Kernel.++(review_checks(repository))
@@ -436,8 +439,54 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
     ]
   end
 
+  defp sandbox_checks(repository) do
+    policy_enabled? = SandboxPolicy.allowed?(repository)
+    readiness = SandboxRegistry.readiness(repository)
+    provider_configured? = readiness["configured"] == true
+
+    [
+      check(
+        "sandbox.policy",
+        "Sandbox execution",
+        "passed",
+        "sandbox",
+        if(policy_enabled?,
+          do: "Sandbox execution is enabled for manual runs.",
+          else: "Sandbox execution is disabled by repository policy."
+        )
+      ),
+      check(
+        "sandbox.provider",
+        "Sandbox provider",
+        cond do
+          provider_configured? and readiness["ready"] == true -> "passed"
+          policy_enabled? -> "failed"
+          true -> "not_checked"
+        end,
+        "sandbox",
+        cond do
+          provider_configured? and readiness["ready"] == true ->
+            "#{readiness["label"] || "Sandbox provider"} is configured."
+
+          policy_enabled? ->
+            "Sandbox execution is enabled but no provider is configured."
+
+          true ->
+            "Sandbox provider is not configured."
+        end
+      ),
+      check(
+        "sandbox.manual_only",
+        "Sandbox mode",
+        "passed",
+        "sandbox",
+        "Sandbox execution is manual only."
+      )
+    ]
+  end
+
   defp validation_checks(repository) do
-    policy = Policy.load(repository["path"] || "")
+    policy = ValidationPolicy.load(repository["path"] || "")
 
     [
       check(

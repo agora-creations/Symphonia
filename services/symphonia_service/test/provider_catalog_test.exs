@@ -27,7 +27,7 @@ defmodule SymphoniaService.ProviderCatalogTest do
     end
 
     refute Map.has_key?(providers, "cloud_sandbox")
-    refute Code.ensure_loaded?(SymphoniaService.Runner.CloudSandboxProvider)
+    assert Code.ensure_loaded?(SymphoniaService.Runner.CloudSandboxProvider)
   end
 
   test "provider rows expose deterministic contract fields" do

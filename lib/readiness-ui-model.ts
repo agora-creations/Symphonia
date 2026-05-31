@@ -56,6 +56,7 @@ export function groupReadinessChecks(
     automation: [],
     provider: [],
     runner: [],
+    sandbox: [],
     validation: [],
     github: [],
     review: [],

@@ -8,7 +8,7 @@ export function MoreFeaturesSection() {
     <section className="border-y border-[var(--landing-line)] bg-[var(--landing-cream)] px-5 py-16 md:py-24">
       <div className="mx-auto max-w-[1180px]">
         <div className="max-w-[680px]">
-          <p className="mb-5 text-[14px] font-semibold uppercase text-[var(--landing-orange)]">
+          <p className="mb-5 text-[14px] font-semibold uppercase text-[var(--landing-blue)]">
             And so much more
           </p>
           <h2 className="text-balance text-[42px] font-semibold leading-[1.02] md:text-[64px]">
@@ -41,7 +41,7 @@ function SyncPanel() {
         sizes="(max-width: 1024px) 94vw, 590px"
       />
       <div className="px-6 pb-7">
-        <p className="text-[13px] font-semibold uppercase text-[var(--landing-orange)]">
+        <p className="text-[13px] font-semibold uppercase text-[var(--landing-blue)]">
           Continuous Agent Execution
         </p>
         <h3 className="mt-3 text-[30px] font-semibold leading-tight">
@@ -61,7 +61,7 @@ function MoreFeatureCard({ feature }: { feature: MoreFeature }) {
   return (
     <article className="rounded-[8px] border border-[var(--landing-line)] bg-[var(--landing-paper)] p-6">
       <div className="mb-8 flex items-center justify-between gap-4">
-        <span className="text-[13px] font-semibold uppercase text-[var(--landing-orange)]">
+        <span className="text-[13px] font-semibold uppercase text-[var(--landing-blue)]">
           {feature.label ?? "PRO"}
         </span>
         <ArrowUpRight className="h-4 w-4 text-[var(--landing-muted)]" />

@@ -17,7 +17,9 @@ defmodule SymphoniaService.CodingAssistant do
   }
 
   alias SymphoniaService.Access.Actor
+  alias SymphoniaService.Runner.CloudSandboxProvider
   alias SymphoniaService.Runners.{Assignments, AssignmentStore, LocalService, SelectionPolicy}
+  alias SymphoniaService.Sandbox.Policy, as: SandboxPolicy
   alias SymphoniaService.TaskStore
 
   @continuation_max_attempts 2
@@ -28,24 +30,34 @@ defmodule SymphoniaService.CodingAssistant do
 
     provider = provider()
 
-    runner = Map.get(params, "runner", LocalService.runner_metadata())
+    runner =
+      if SandboxPolicy.requested?(params) do
+        CloudSandboxProvider.runner_metadata(repository)
+      else
+        Map.get(params, "runner", LocalService.runner_metadata())
+      end
+
     if remote_runner?(runner), do: Assignments.preflight(repository, task)
+    if cloud_sandbox?(runner), do: sandbox_preflight!(registry_path, repository, task, params)
+    run_provider = if cloud_sandbox?(runner), do: AppServerProvider, else: provider
 
     run =
       RunStore.create(%{
-        "provider" => provider_id(provider),
+        "provider" => provider_id(run_provider),
         "repository" => repository["key"],
         "task" => task_key,
         "kind" => "assignment",
         "runner" => runner,
         "execution_mode" => execution_mode_for(runner),
+        "workspace_provider" => workspace_provider_for(runner),
         "codex_thread_id" => previous_codex_thread_id(task)
       })
 
     TaskStore.apply_event(repository, task_key, "start")
     task = put_task_run(repository, task_key, run)
 
-    if remote_runner?(runner) do
+    cond do
+      remote_runner?(runner) ->
       actor = Map.get(params, "actor", Actor.default())
 
       {:ok, assignment} =
@@ -66,7 +78,50 @@ defmodule SymphoniaService.CodingAssistant do
         "task" => task,
         "assignment" => AssignmentStore.public(assignment)
       }
-    else
+
+      cloud_sandbox?(runner) ->
+        actor = Map.get(params, "actor", Actor.default())
+
+        {:ok, assignment} =
+          Assignments.create_sandbox_for_run(
+            registry_path,
+            repository,
+            task,
+            run,
+            runner,
+            actor,
+            params
+          )
+
+        run =
+          run
+          |> RunStore.update_metadata(%{
+            "assignment_id" => assignment["id"],
+            "execution_mode" => "cloud_sandbox",
+            "workspace_provider" => "cloud_sandbox"
+          })
+          |> RunStore.mark_step("Creating sandbox")
+
+        task = put_task_run(repository, task_key, run)
+
+        {:ok, _pid} =
+          CloudSandboxProvider.start(
+            registry_path,
+            repository,
+            task,
+            run,
+            assignment,
+            actor,
+            params
+          )
+
+        %{
+          "run" => RunStore.public(run),
+          "task" => task,
+          "assignment" => AssignmentStore.public(assignment)
+        }
+
+      true ->
       {:ok, _pid} =
         RunSupervisor.start_run(%{
           "registry_path" => registry_path,
@@ -317,6 +372,7 @@ defmodule SymphoniaService.CodingAssistant do
       "execution_mode" => run["execution_mode"],
       "assignment_id" => run["assignment_id"],
       "workspace_provider" => run["workspace_provider"],
+      "cleanup_warning" => run["cleanup_warning"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],
       "retry_at" => run["retry_at"],
@@ -352,8 +408,25 @@ defmodule SymphoniaService.CodingAssistant do
   defp remote_runner?(%{"mode" => "remote_runner"}), do: true
   defp remote_runner?(_runner), do: false
 
+  defp cloud_sandbox?(%{"mode" => "cloud_sandbox"}), do: true
+  defp cloud_sandbox?(_runner), do: false
+
   defp execution_mode_for(%{"mode" => "remote_runner"}), do: "remote"
+  defp execution_mode_for(%{"mode" => "cloud_sandbox"}), do: "cloud_sandbox"
   defp execution_mode_for(_runner), do: "local"
+
+  defp workspace_provider_for(%{"mode" => "cloud_sandbox"}), do: "cloud_sandbox"
+  defp workspace_provider_for(_runner), do: nil
+
+  defp sandbox_preflight!(registry_path, repository, task, params) do
+    actor = Map.get(params, "actor", Actor.default())
+
+    case SandboxPolicy.authorize_run(registry_path, repository, actor, task, params) do
+      :ok -> :ok
+      {:error, {_status, %{"error" => message}}} -> raise ArgumentError, message
+      {:error, reason} -> raise ArgumentError, to_string(reason)
+    end
+  end
 
   defp previous_codex_thread_id(task) do
     latest_private_codex_thread_id(task) ||

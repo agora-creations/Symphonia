@@ -96,6 +96,7 @@ defmodule SymphoniaService.CodingAssistant.RunSupervisor do
       "execution_mode" => run["execution_mode"],
       "assignment_id" => run["assignment_id"],
       "workspace_provider" => run["workspace_provider"],
+      "cleanup_warning" => run["cleanup_warning"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],
       "started_at" => run["started_at"],

@@ -60,6 +60,9 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
   assert.match(sidebar, /WORKSPACE_DOCUMENT_CREATE_TYPES/);
   assert.doesNotMatch(sidebar, /label="Settings"/);
   assert.match(appSidebar, /<SidebarFooter repoKey=\{repoKey\} \/>/);
+  assert.match(appSidebar, /aria-label=\{themeToggleLabel\}/);
+  assert.match(appSidebar, /Switch to light mode/);
+  assert.match(appSidebar, /Switch to dark mode/);
   assert.match(appSidebar, /aria-label="Settings"/);
   assert.match(appSidebar, /settingsHref = `\/r\/\$\{repoKey\.toLowerCase\(\)\}\/settings`/);
   assert.doesNotMatch(docTree, /SpecCreateMenu/);

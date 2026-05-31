@@ -149,8 +149,10 @@ defmodule SymphoniaService.Runners.AssignmentStore do
       "repoKey" => assignment["repo_key"],
       "taskKey" => assignment["task_key"],
       "runnerId" => assignment["runner_id"],
+      "runnerMode" => assignment["runner_mode"],
       "state" => assignment["state"],
       "provider" => assignment["provider"],
+      "workspaceProvider" => assignment["workspace_provider"],
       "baseBranch" => assignment["base_branch"],
       "baseSha" => assignment["base_sha"],
       "createdAt" => assignment["created_at"],
@@ -159,6 +161,7 @@ defmodule SymphoniaService.Runners.AssignmentStore do
       "failureClass" => assignment["failure_class"],
       "publicMessage" => assignment["public_message"],
       "changedFileCount" => length(List.wrap(assignment["changed_files"])),
+      "cleanupWarning" => assignment["cleanup_warning"],
       "cancellationRequested" => assignment["cancellation_requested"] == true
     }
     |> reject_nil()
@@ -171,6 +174,7 @@ defmodule SymphoniaService.Runners.AssignmentStore do
       "repoKey" => assignment["repo_key"],
       "taskKey" => assignment["task_key"],
       "provider" => assignment["provider"],
+      "workspaceProvider" => assignment["workspace_provider"],
       "baseBranch" => assignment["base_branch"],
       "baseSha" => assignment["base_sha"],
       "repository" => assignment["repository"],

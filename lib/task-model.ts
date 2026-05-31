@@ -72,9 +72,13 @@ export interface CodingAssistantRun {
     mode: "local_service" | "remote_runner" | string;
     name: string;
   };
-  executionMode?: "local" | "remote" | string;
+  executionMode?: "local" | "remote" | "cloud_sandbox" | string;
   assignmentId?: string;
-  workspaceProvider?: "local_git_worktree" | "experimental_sandbox" | string;
+  workspaceProvider?: "local_git_worktree" | "experimental_sandbox" | "cloud_sandbox" | string;
+  cleanupWarning?: {
+    code: "sandbox_release_failed" | string;
+    message: string;
+  };
   workspacePath?: string;
   codexThreadId?: string;
   turnId?: string;

@@ -20,7 +20,7 @@ export function FeatureSections() {
 function IntroBlock() {
   return (
     <div className="mx-auto max-w-[760px] px-5 py-16 text-center md:py-24">
-      <p className="mb-5 text-[14px] font-semibold uppercase text-[var(--landing-orange)]">
+      <p className="mb-5 text-[14px] font-semibold uppercase text-[var(--landing-blue)]">
         Write naturally
       </p>
       <h2 className="text-balance text-[42px] font-semibold leading-[1.02] md:text-[68px]">
@@ -39,7 +39,7 @@ function FeaturePanel({ feature }: { feature: LandingFeature }) {
   return (
     <article className="grid items-center gap-8 border-t border-[var(--landing-line)] py-12 md:grid-cols-2 md:py-16">
       <div className={feature.reverse ? "md:order-2" : ""}>
-        <p className="text-[14px] font-semibold uppercase text-[var(--landing-orange)]">
+        <p className="text-[14px] font-semibold uppercase text-[var(--landing-blue)]">
           {feature.eyebrow}
         </p>
         <h3 className="mt-4 max-w-[560px] text-balance text-[34px] font-semibold leading-[1.06] md:text-[52px]">
@@ -51,7 +51,7 @@ function FeaturePanel({ feature }: { feature: LandingFeature }) {
         <ul className="mt-7 space-y-3">
           {feature.bullets.map((bullet) => (
             <li key={bullet} className="flex gap-3 text-[15px] leading-6 text-[var(--landing-muted)]">
-              <Check className="mt-0.5 h-5 w-5 shrink-0 text-[var(--landing-orange)]" />
+              <Check className="mt-0.5 h-5 w-5 shrink-0 text-[var(--landing-blue)]" />
               <span>{bullet}</span>
             </li>
           ))}
