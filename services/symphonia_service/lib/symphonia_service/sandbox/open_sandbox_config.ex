@@ -53,6 +53,7 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
           string_config(opts, "memory", "SYMPHONIA_OPENSANDBOX_MEMORY") || @default_memory
       },
       "workspaceMode" => "source_bundle",
+      "credentialMode" => "source_bundle",
       "egressMode" =>
         string_config(opts, "egressMode", "SYMPHONIA_OPENSANDBOX_EGRESS_MODE") || "restricted",
       "runnerCommand" =>
@@ -96,6 +97,7 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
       "label" => @label,
       "mode" => "manual_only",
       "workspaceMode" => config["workspaceMode"],
+      "credentialMode" => config["credentialMode"],
       "egressMode" => config["egressMode"],
       "resourceLimits" => config["resourceLimits"],
       "ttlSeconds" => config["ttlSeconds"],
@@ -116,6 +118,7 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
       "timeoutSeconds",
       "resourceLimits",
       "workspaceMode",
+      "credentialMode",
       "egressMode",
       "runnerCommand",
       "resultPath",
@@ -134,6 +137,7 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
       "timeoutSeconds",
       "resourceLimits",
       "workspaceMode",
+      "credentialMode",
       "egressMode"
     ])
   end

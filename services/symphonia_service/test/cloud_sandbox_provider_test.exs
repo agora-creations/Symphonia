@@ -6,8 +6,11 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
   alias SymphoniaService.GitHub.InstallationStore
   alias SymphoniaService.Runners.AssignmentStore
   alias SymphoniaService.Secrets.ReferenceStore, as: SecretReferences
+  alias SymphoniaService.Sandbox.OpenSandboxOperations
+  alias SymphoniaService.Sandbox.OpenSandboxSmoke
   alias SymphoniaService.Sandbox.Policy, as: SandboxPolicy
   alias SymphoniaService.Sandbox.Registry, as: SandboxRegistry
+  alias SymphoniaService.Sandbox.SourceBundle
   alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore, Workspace}
 
   defmodule StubClient do
@@ -24,7 +27,11 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
   defmodule MockOpenSandboxClient do
     def create(_config, body) do
       notify({:opensandbox_create, body})
-      {:ok, %{"id" => "sandbox_mock", "status" => %{"state" => "Running"}}}
+
+      case failure() do
+        "create" -> {:error, "opensandbox_request_failed"}
+        _other -> {:ok, %{"id" => "sandbox_mock", "status" => %{"state" => "Running"}}}
+      end
     end
 
     def get(_config, sandbox_id) do
@@ -35,42 +42,67 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
     def endpoint(_config, sandbox_id, port) do
       notify({:opensandbox_endpoint, sandbox_id, port})
 
-      {:ok,
-       %{
-         "url" => "http://execd.example.invalid",
-         "headers" => %{"X-EXECD-ACCESS-TOKEN" => "exec-token"}
-       }}
+      case failure() do
+        "endpoint" ->
+          {:error, "opensandbox_request_failed"}
+
+        _other ->
+          {:ok,
+           %{
+             "url" => "http://execd.example.invalid",
+             "headers" => %{"X-EXECD-ACCESS-TOKEN" => "exec-token"}
+           }}
+      end
     end
 
     def upload_file(execd, path, content) do
       notify({:opensandbox_upload, path, byte_size(content), execd})
-      :ok
+
+      case failure() do
+        "upload" -> {:error, "opensandbox_request_failed"}
+        _other -> :ok
+      end
     end
 
     def run_command(_execd, command, opts) do
       notify({:opensandbox_command, command, opts})
-      {:ok, "completed"}
+
+      if failure() == "run" and String.contains?(command, "python3") do
+        {:error, "opensandbox_request_failed"}
+      else
+        {:ok, "completed"}
+      end
     end
 
     def download_file(_execd, path) do
       notify({:opensandbox_download, path})
 
-      {:ok,
-       JSON.encode!(%{
-         "status" => "completed",
-         "patchBundle" => %{
-           "format" => "git_diff",
-           "encoding" => "utf8",
-           "diff" => opensandbox_diff()
-         },
-         "changedFiles" => [%{"path" => "lib/opensandbox_output.ex", "status" => "added"}],
-         "publicSummary" => "OpenSandbox produced a reviewable patch."
-       })}
+      case failure() do
+        "result" ->
+          {:ok, "not-json"}
+
+        _other ->
+          {:ok,
+           JSON.encode!(%{
+             "status" => "completed",
+             "patchBundle" => %{
+               "format" => "git_diff",
+               "encoding" => "utf8",
+               "diff" => opensandbox_diff()
+             },
+             "changedFiles" => [%{"path" => "lib/opensandbox_output.ex", "status" => "added"}],
+             "publicSummary" => "OpenSandbox produced a reviewable patch."
+           })}
+      end
     end
 
     def delete(_config, sandbox_id) do
       notify({:opensandbox_delete, sandbox_id})
-      :ok
+
+      case failure() do
+        "release" -> {:error, "opensandbox_request_failed"}
+        _other -> :ok
+      end
     end
 
     defp opensandbox_diff do
@@ -94,6 +126,8 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
 
       :ok
     end
+
+    defp failure, do: Application.get_env(:symphonia_service, :opensandbox_failure)
   end
 
   setup do
@@ -145,6 +179,7 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
       Application.delete_env(:symphonia_service, :github_home)
       Application.delete_env(:symphonia_service, :opensandbox_client)
       Application.delete_env(:symphonia_service, :opensandbox_test_pid)
+      Application.delete_env(:symphonia_service, :opensandbox_failure)
       File.rm_rf(root)
     end)
 
@@ -334,6 +369,172 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
     assert "sandbox.prepare_started" in actions
     assert "sandbox.run_started" in actions
     assert "sandbox.release_completed" in actions
+  end
+
+  test "opensandbox source bundle excludes private runtime material", %{
+    root: root,
+    repository: repository
+  } do
+    repo_path = repository["path"]
+    File.mkdir_p!(Path.join(repo_path, ".symphonia/runs"))
+    File.mkdir_p!(Path.join(repo_path, "audit"))
+    File.mkdir_p!(Path.join(repo_path, "provider-output"))
+    File.mkdir_p!(Path.join(repo_path, "terminal-logs"))
+    File.mkdir_p!(Path.join(repo_path, "validation-logs"))
+    File.mkdir_p!(Path.join(repo_path, "node_modules/pkg"))
+    File.mkdir_p!(Path.join(repo_path, "lib"))
+    File.write!(Path.join(repo_path, ".env"), "SECRET=value\n")
+    File.write!(Path.join(repo_path, ".symphonia/runs/run.json"), "{}\n")
+    File.write!(Path.join(repo_path, "audit/events.jsonl"), "{}\n")
+    File.write!(Path.join(repo_path, "provider-output/output.log"), "raw\n")
+    File.write!(Path.join(repo_path, "terminal-logs/terminal.log"), "raw\n")
+    File.write!(Path.join(repo_path, "validation-logs/validation.log"), "raw\n")
+    File.write!(Path.join(repo_path, "node_modules/pkg/index.js"), "module.exports = {}\n")
+    File.write!(Path.join(repo_path, "lib/reviewable.ex"), "defmodule Reviewable do\nend\n")
+    git_output!(["-C", repo_path, "add", "-A"])
+
+    git_output!([
+      "-C",
+      repo_path,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      "Add bundle fixture"
+    ])
+
+    base_sha = String.trim(git_output!(["-C", repo_path, "rev-parse", "HEAD"]))
+    {:ok, archive} = SourceBundle.archive(repository, %{"base_sha" => base_sha})
+    archive_path = Path.join(root, "source.tar")
+    File.write!(archive_path, archive)
+    {listing, 0} = System.cmd("tar", ["-tf", archive_path], stderr_to_stdout: true)
+
+    assert listing =~ "lib/reviewable.ex"
+    refute listing =~ ".git"
+    refute listing =~ ".env"
+    refute listing =~ ".symphonia/runs"
+    refute listing =~ "audit/events.jsonl"
+    refute listing =~ "provider-output"
+    refute listing =~ "terminal-logs"
+    refute listing =~ "validation-logs"
+    refute listing =~ "node_modules"
+  end
+
+  test "opensandbox smoke action uses fixture workspace and records sanitized operations", %{
+    registry_path: registry_path,
+    repository: _repository
+  } do
+    Application.put_env(:symphonia_service, :opensandbox_client, MockOpenSandboxClient)
+    Application.put_env(:symphonia_service, :opensandbox_test_pid, self())
+    System.put_env("SYMPHONIA_OPENSANDBOX_ENDPOINT", "http://opensandbox.example.invalid")
+    System.put_env("SYMPHONIA_OPENSANDBOX_API_KEY", "opensandbox-secret-value")
+
+    repository = enable_opensandbox(registry_path)
+    before_tasks = TaskStore.list_tasks(repository)
+
+    assert {:ok, smoke} =
+             OpenSandboxSmoke.run(registry_path, repository, %{
+               "id" => "owner",
+               "name" => "Owner",
+               "role" => "owner"
+             })
+
+    assert smoke["status"] == "passed"
+    assert smoke["changedFileCount"] == 1
+    assert smoke["workspaceMode"] == "source_bundle"
+    assert TaskStore.list_tasks(repository) == before_tasks
+
+    assert_received {:opensandbox_create, _create_body}
+    assert_received {:opensandbox_upload, "/workspace/source.tar", source_size, _execd}
+    assert source_size > 0
+    assert_received {:opensandbox_upload, "/workspace/.symphonia/context-pack.json", _context_size, _execd}
+    assert_received {:opensandbox_command, prepare_command, _prepare_opts}
+    assert prepare_command =~ "git commit --allow-empty -m symphonia-baseline"
+    assert_received {:opensandbox_command, smoke_command, _smoke_opts}
+    assert smoke_command =~ "python3"
+    assert_received {:opensandbox_download, "/workspace/.symphonia/result.json"}
+    assert_received {:opensandbox_delete, "sandbox_mock"}
+
+    operations = OpenSandboxOperations.public(registry_path, repository)
+    assert operations["lastSmokeStatus"] == "passed"
+    refute operations["cleanupWarning"]
+
+    audit = JSON.encode!(AuditLog.list(registry_path, repository, limit: :all))
+    assert audit =~ "sandbox.opensandbox_smoke_started"
+    assert audit =~ "sandbox.opensandbox_smoke_completed"
+    refute audit =~ "sandbox_mock"
+    refute audit =~ "exec-token"
+    refute audit =~ "opensandbox-secret-value"
+    refute audit =~ "diff --git"
+  end
+
+  test "opensandbox smoke release failure is a safe cleanup warning", %{
+    registry_path: registry_path,
+    repository: _repository
+  } do
+    Application.put_env(:symphonia_service, :opensandbox_client, MockOpenSandboxClient)
+    Application.put_env(:symphonia_service, :opensandbox_test_pid, self())
+    Application.put_env(:symphonia_service, :opensandbox_failure, "release")
+    System.put_env("SYMPHONIA_OPENSANDBOX_ENDPOINT", "http://opensandbox.example.invalid")
+    System.put_env("SYMPHONIA_OPENSANDBOX_API_KEY", "opensandbox-secret-value")
+
+    repository = enable_opensandbox(registry_path)
+
+    assert {:ok, smoke} =
+             OpenSandboxSmoke.run(registry_path, repository, %{
+               "id" => "owner",
+               "name" => "Owner",
+               "role" => "owner"
+             })
+
+    assert smoke["status"] == "passed"
+    assert smoke["cleanupWarning"]
+
+    operations = OpenSandboxOperations.public(registry_path, repository)
+    assert operations["lastSmokeStatus"] == "passed"
+    assert operations["cleanupWarning"]
+    assert operations["lastCleanupStatus"] == "warning"
+
+    audit = JSON.encode!(AuditLog.list(registry_path, repository, limit: :all))
+    assert audit =~ "sandbox.opensandbox_smoke_completed"
+    refute audit =~ "sandbox_mock"
+    refute audit =~ "opensandbox-secret-value"
+  end
+
+  test "opensandbox smoke run failure attempts release and records safe failure", %{
+    registry_path: registry_path,
+    repository: _repository
+  } do
+    Application.put_env(:symphonia_service, :opensandbox_client, MockOpenSandboxClient)
+    Application.put_env(:symphonia_service, :opensandbox_test_pid, self())
+    Application.put_env(:symphonia_service, :opensandbox_failure, "run")
+    System.put_env("SYMPHONIA_OPENSANDBOX_ENDPOINT", "http://opensandbox.example.invalid")
+    System.put_env("SYMPHONIA_OPENSANDBOX_API_KEY", "opensandbox-secret-value")
+
+    repository = enable_opensandbox(registry_path)
+
+    assert {:error, {409, payload}} =
+             OpenSandboxSmoke.run(registry_path, repository, %{
+               "id" => "owner",
+               "name" => "Owner",
+               "role" => "owner"
+             })
+
+    assert payload["status"] == "failed"
+    assert payload["reasonCode"] in ["sandbox_unreachable", "sandbox_run_failed"]
+    assert_received {:opensandbox_delete, "sandbox_mock"}
+
+    operations = OpenSandboxOperations.public(registry_path, repository)
+    assert operations["lastSmokeStatus"] == "failed"
+    refute operations["cleanupWarning"]
+
+    audit = JSON.encode!(AuditLog.list(registry_path, repository, limit: :all))
+    assert audit =~ "sandbox.opensandbox_smoke_failed"
+    refute audit =~ "sandbox_mock"
+    refute audit =~ "exec-token"
+    refute audit =~ "opensandbox-secret-value"
   end
 
   test "opensandbox policy rejects unconfigured provider before sandbox creation", %{

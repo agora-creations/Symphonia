@@ -31,6 +31,7 @@ defmodule SymphoniaService.HTTPServer do
     SelectionPolicy
   }
 
+  alias SymphoniaService.Sandbox.OpenSandboxSmoke
   alias SymphoniaService.Sandbox.Policy, as: SandboxPolicy
   alias SymphoniaService.Secrets.ReferenceStore, as: SecretReferences
 
@@ -1097,6 +1098,23 @@ defmodule SymphoniaService.HTTPServer do
                "repo" => repository["key"],
                "policy" => SandboxPolicy.public(repository, registry_path)
              }}
+          end
+        )
+
+      ["api", "repositories", repo, "sandbox", "opensandbox", "smoke"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "sandbox.configure",
+          repository_target(),
+          fn ->
+            case OpenSandboxSmoke.run(registry_path, repository, actor, decode_json(body)) do
+              {:ok, smoke} -> {200, %{"repo" => repository["key"], "smoke" => smoke}}
+              {:error, {status, payload}} -> {status, payload}
+            end
           end
         )
 

@@ -298,7 +298,7 @@ export function ClariseRepoHome({ repoKey }: { repoKey: string }) {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="relative flex min-h-full bg-background text-foreground">
+      <div className="relative flex h-full min-h-full bg-background text-foreground">
         <div
           className={cn(
             "fixed inset-0 z-30 bg-black/55 transition-opacity md:hidden",
@@ -314,7 +314,7 @@ export function ClariseRepoHome({ repoKey }: { repoKey: string }) {
           onClose={() => setSidebarOpen(false)}
         />
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <header className="flex items-center gap-3 border-b bg-background/80 px-4 py-2.5 backdrop-blur sm:px-6">
             <button
               type="button"
@@ -380,35 +380,58 @@ export function ClariseRepoHome({ repoKey }: { repoKey: string }) {
             </div>
           </header>
 
-          <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-            <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-              <ThreadPrimitive.Empty>
-                <ClariseWelcome repoKey={repoKey} />
-              </ThreadPrimitive.Empty>
-
-              <div className="mx-auto flex max-w-4xl flex-col gap-4">
-                <ThreadPrimitive.Messages>
-                  {({ message }) => <ClariseMessage key={message.id} message={message} />}
-                </ThreadPrimitive.Messages>
-              </div>
-
-              <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 -mx-4 mt-4 sm:-mx-6">
-                <div className="pointer-events-none flex justify-center pb-2">
-                  <ThreadPrimitive.ScrollToBottom
-                    behavior="smooth"
-                    aria-label="Scroll to latest message"
-                    className="pointer-events-auto grid h-9 w-9 place-items-center rounded-full border bg-card text-muted-foreground shadow-[var(--elevation-card)] transition hover:bg-accent hover:text-foreground disabled:hidden"
-                  >
-                    <ChevronDown className="h-4 w-4" />
-                  </ThreadPrimitive.ScrollToBottom>
-                </div>
-                <ClariseComposer />
-              </ThreadPrimitive.ViewportFooter>
-            </ThreadPrimitive.Viewport>
-          </ThreadPrimitive.Root>
+          <ClariseThreadSurface repoKey={repoKey} />
         </div>
       </div>
     </AssistantRuntimeProvider>
+  );
+}
+
+function ClariseThreadSurface({ repoKey }: { repoKey: string }) {
+  const hasStartedChat = useAuiState((state) => !state.thread.isEmpty);
+
+  return (
+    <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <ThreadPrimitive.Viewport
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6",
+          hasStartedChat && "flex flex-col",
+        )}
+      >
+        <ThreadPrimitive.Empty>
+          <ClariseWelcome repoKey={repoKey} />
+        </ThreadPrimitive.Empty>
+
+        <div
+          className={cn(
+            "mx-auto flex w-full max-w-4xl flex-col gap-4",
+            hasStartedChat && "flex-1",
+          )}
+        >
+          <ThreadPrimitive.Messages>
+            {({ message }) => <ClariseMessage key={message.id} message={message} />}
+          </ThreadPrimitive.Messages>
+        </div>
+
+        <ThreadPrimitive.ViewportFooter
+          className={cn(
+            "sticky bottom-0 z-10 -mx-4 sm:-mx-6",
+            hasStartedChat ? "mt-auto" : "mt-4",
+          )}
+        >
+          <div className="pointer-events-none flex justify-center pb-2">
+            <ThreadPrimitive.ScrollToBottom
+              behavior="smooth"
+              aria-label="Scroll to latest message"
+              className="pointer-events-auto grid h-9 w-9 place-items-center rounded-full border bg-card text-muted-foreground shadow-[var(--elevation-card)] transition hover:bg-accent hover:text-foreground disabled:hidden"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </ThreadPrimitive.ScrollToBottom>
+          </div>
+          <ClariseComposer />
+        </ThreadPrimitive.ViewportFooter>
+      </ThreadPrimitive.Viewport>
+    </ThreadPrimitive.Root>
   );
 }
 

@@ -10,7 +10,7 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
   @behaviour SymphoniaService.Sandbox.Provider
 
   alias SymphoniaService.Runners.PatchBundle
-  alias SymphoniaService.Sandbox.{OpenSandboxConfig, Session}
+  alias SymphoniaService.Sandbox.{OpenSandboxConfig, OpenSandboxError, Session, SourceBundle}
 
   @execd_port 44_772
 
@@ -42,7 +42,7 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
     config = session["config"] || %{}
     execd = session["execd"] || %{}
 
-    with {:ok, archive} <- source_archive(repository, assignment),
+    with {:ok, archive} <- SourceBundle.archive(repository, assignment),
          :ok <- client().upload_file(execd, config["sourceBundlePath"], archive),
          {:ok, _output} <- run_command(execd, prepare_command(config), config["timeoutSeconds"]),
          :ok <-
@@ -204,39 +204,6 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
     end
   end
 
-  defp source_archive(repository, assignment) do
-    repo_path = repository["path"]
-    base_sha = assignment["base_sha"]
-    archive_path = Path.join(System.tmp_dir!(), "symphonia-source-#{System.unique_integer([:positive])}.tar")
-
-    args = [
-      "-C",
-      repo_path,
-      "archive",
-      "--format=tar",
-      "--output",
-      archive_path,
-      base_sha,
-      "--",
-      ".",
-      ":(exclude).symphonia",
-      ":(exclude)symphonia/tasks",
-      ":(exclude)symphonia/run-summaries"
-    ]
-
-    with {_, 0} <- System.cmd("git", args, stderr_to_stdout: true),
-         {:ok, body} <- File.read(archive_path) do
-      File.rm(archive_path)
-      {:ok, body}
-    else
-      _other ->
-        File.rm(archive_path)
-        {:error, "source_bundle_failed"}
-    end
-  rescue
-    _error -> {:error, "source_bundle_failed"}
-  end
-
   defp prepare_command(config) do
     source_path = shell_escape(config["sourceBundlePath"])
 
@@ -357,8 +324,8 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
     |> String.replace(~r/[^a-zA-Z0-9._-]/, "_")
     |> String.slice(0, 80)
     |> case do
-      "" -> "opensandbox_failed"
-      value -> value
+      "" -> "sandbox_run_failed"
+      value -> OpenSandboxError.normalize(value)
     end
   end
 

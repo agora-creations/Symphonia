@@ -3,7 +3,44 @@ defmodule SymphoniaService.RunnersHTTPTest do
 
   alias SymphoniaService.Access.AuditLog
   alias SymphoniaService.CodingAssistant.RunStore
+  alias SymphoniaService.Secrets.ReferenceStore, as: SecretReferences
   alias SymphoniaService.{HTTPServer, RepositoryRegistry, TaskStore, Workspace}
+
+  defmodule MockOpenSandboxClient do
+    def create(_config, _body), do: {:ok, %{"id" => "sandbox_http_mock", "status" => %{"state" => "Running"}}}
+    def get(_config, sandbox_id), do: {:ok, %{"id" => sandbox_id, "status" => %{"state" => "Running"}}}
+
+    def endpoint(_config, _sandbox_id, _port) do
+      {:ok, %{"url" => "http://execd.example.invalid", "headers" => %{"X-EXECD-ACCESS-TOKEN" => "exec-token"}}}
+    end
+
+    def upload_file(_execd, _path, _content), do: :ok
+    def run_command(_execd, _command, _opts), do: {:ok, "completed"}
+
+    def download_file(_execd, _path) do
+      {:ok,
+       JSON.encode!(%{
+         "status" => "completed",
+         "patchBundle" => %{
+           "format" => "git_diff",
+           "encoding" => "utf8",
+           "diff" => """
+           diff --git a/lib/opensandbox_http_smoke.ex b/lib/opensandbox_http_smoke.ex
+           new file mode 100644
+           index 0000000..1269488
+           --- /dev/null
+           +++ b/lib/opensandbox_http_smoke.ex
+           @@ -0,0 +1,2 @@
+           +defmodule OpenSandboxHTTPSmoke do
+           +end
+           """
+         },
+         "changedFiles" => [%{"path" => "lib/opensandbox_http_smoke.ex", "status" => "added"}]
+       })}
+    end
+
+    def delete(_config, _sandbox_id), do: :ok
+  end
 
   setup do
     root =
@@ -15,6 +52,8 @@ defmodule SymphoniaService.RunnersHTTPTest do
     File.mkdir_p!(Path.join(repo_path, ".git"))
 
     previous_runs_root = System.get_env("SYMPHONIA_RUNS_ROOT")
+    previous_opensandbox_endpoint = System.get_env("SYMPHONIA_OPENSANDBOX_ENDPOINT")
+    previous_opensandbox_api_key = System.get_env("SYMPHONIA_OPENSANDBOX_API_KEY")
     System.put_env("SYMPHONIA_RUNS_ROOT", runs_root)
 
     repository = RepositoryRegistry.add(registry_path, %{"path" => repo_path, "key" => "SYM"})
@@ -33,6 +72,9 @@ defmodule SymphoniaService.RunnersHTTPTest do
     on_exit(fn ->
       if Process.alive?(pid), do: GenServer.stop(pid)
       restore_env("SYMPHONIA_RUNS_ROOT", previous_runs_root)
+      restore_env("SYMPHONIA_OPENSANDBOX_ENDPOINT", previous_opensandbox_endpoint)
+      restore_env("SYMPHONIA_OPENSANDBOX_API_KEY", previous_opensandbox_api_key)
+      Application.delete_env(:symphonia_service, :opensandbox_client)
       File.rm_rf(root)
     end)
 
@@ -258,6 +300,60 @@ defmodule SymphoniaService.RunnersHTTPTest do
       |> Enum.map(& &1["action"])
 
     assert "sandbox.policy_enabled" in actions
+  end
+
+  test "opensandbox smoke route is owner gated and sanitized", %{
+    port: port,
+    registry_path: registry_path,
+    repository: repository
+  } do
+    Application.put_env(:symphonia_service, :opensandbox_client, MockOpenSandboxClient)
+    System.put_env("SYMPHONIA_OPENSANDBOX_ENDPOINT", "http://opensandbox.example.invalid")
+    System.put_env("SYMPHONIA_OPENSANDBOX_API_KEY", "opensandbox-secret-value")
+
+    {:ok, _reference} =
+      SecretReferences.create(registry_path, repository, %{
+        "label" => "OpenSandbox API key",
+        "scope" => "sandbox.provider",
+        "source" => "environment",
+        "envName" => "SYMPHONIA_OPENSANDBOX_API_KEY"
+      })
+
+    denied =
+      http_json(
+        port,
+        "POST",
+        "/api/repositories/SYM/sandbox/opensandbox/smoke",
+        "{}",
+        [{"x-symphonia-role", "maintainer"}]
+      )
+
+    assert denied.status == 403
+
+    smoke =
+      http_json(
+        port,
+        "POST",
+        "/api/repositories/SYM/sandbox/opensandbox/smoke",
+        "{}",
+        [{"x-symphonia-role", "owner"}]
+      )
+
+    assert smoke.status == 200
+    assert smoke.body["smoke"]["status"] == "passed"
+    assert smoke.body["smoke"]["workspaceMode"] == "source_bundle"
+    refute JSON.encode!(smoke.body) =~ "sandbox_http_mock"
+    refute JSON.encode!(smoke.body) =~ "exec-token"
+    refute JSON.encode!(smoke.body) =~ "opensandbox-secret-value"
+    refute JSON.encode!(smoke.body) =~ "diff --git"
+
+    audit = JSON.encode!(AuditLog.list(registry_path, %{"key" => "SYM"}, limit: :all))
+    assert audit =~ "sandbox.opensandbox_smoke_started"
+    assert audit =~ "sandbox.opensandbox_smoke_completed"
+    refute audit =~ "sandbox_http_mock"
+    refute audit =~ "exec-token"
+    refute audit =~ "opensandbox-secret-value"
+    refute audit =~ "diff --git"
   end
 
   defp register_runner!(port, extra_capabilities) do

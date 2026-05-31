@@ -3,7 +3,13 @@ defmodule SymphoniaService.Sandbox.Registry do
   Resolves configured sandbox providers without creating sandbox sessions.
   """
 
-  alias SymphoniaService.Sandbox.{FakeProvider, OpenSandboxConfig, OpenSandboxProvider, Session}
+  alias SymphoniaService.Sandbox.{
+    FakeProvider,
+    OpenSandboxConfig,
+    OpenSandboxOperations,
+    OpenSandboxProvider,
+    Session
+  }
 
   @fake "fake_sandbox"
   @opensandbox "opensandbox"
@@ -42,6 +48,7 @@ defmodule SymphoniaService.Sandbox.Registry do
             "registry_path" => registry_path
           })
         )
+        |> Map.put("operations", OpenSandboxOperations.public(registry_path, repository_or_policy))
 
       {:ok, provider} ->
         Map.merge(base, provider.readiness(%{}))

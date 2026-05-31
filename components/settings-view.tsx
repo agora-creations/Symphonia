@@ -47,6 +47,10 @@ import {
   type RunnerStatusRow,
 } from "@/lib/runner-model";
 import {
+  sandboxSmokeLabel,
+  sandboxSmokeTone,
+} from "@/lib/sandbox-ui-model";
+import {
   User as UserIcon,
   Bell,
   Bot,
@@ -486,7 +490,31 @@ interface SandboxProviderReadiness {
   label?: string;
   credential?: string;
   workspaceMode?: string;
+  credentialMode?: string;
   egressMode?: string;
+  operations?: OpenSandboxOperations;
+}
+
+interface OpenSandboxOperations {
+  provider?: string;
+  lastSmokeStatus?: "passed" | "failed" | "never_run" | "running" | string;
+  lastSmokeAt?: string;
+  reasonCode?: string;
+  cleanupWarning?: boolean;
+  workspaceMode?: string;
+  lastCleanupStatus?: string;
+  lastCleanupAt?: string;
+  lastCleanupReasonCode?: string;
+}
+
+interface OpenSandboxSmokePayload {
+  provider: string;
+  status: "passed" | "failed" | string;
+  message: string;
+  workspaceMode?: string;
+  changedFileCount?: number;
+  cleanupWarning?: boolean;
+  operations?: OpenSandboxOperations;
 }
 
 interface SecretReference {
@@ -566,6 +594,27 @@ async function setSandboxPolicy(repoKey: string, policy: SandboxPolicy): Promise
     throw new Error(payload.error ?? "Could not update sandbox execution policy");
   }
   return payload.policy;
+}
+
+async function runOpenSandboxSmoke(repoKey: string): Promise<OpenSandboxSmokePayload> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/sandbox/opensandbox/smoke`,
+    {
+      method: "POST",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  const payload = (await res.json()) as {
+    smoke?: OpenSandboxSmokePayload;
+    message?: string;
+    error?: string;
+  };
+  if (!res.ok || !payload.smoke) {
+    throw new Error(payload.message ?? payload.error ?? "Could not run OpenSandbox smoke");
+  }
+  return payload.smoke;
 }
 
 async function fetchSecretReferences(repoKey: string): Promise<SecretReference[]> {
@@ -866,6 +915,7 @@ function HarnessPanel({
   const [pendingRemotePolicy, setPendingRemotePolicy] = useState(false);
   const [sandboxPolicy, setSandboxPolicyState] = useState<SandboxPolicy | null>(null);
   const [pendingSandboxPolicy, setPendingSandboxPolicy] = useState(false);
+  const [pendingSandboxSmoke, setPendingSandboxSmoke] = useState(false);
   const [secretReferences, setSecretReferences] = useState<SecretReference[]>([]);
   const [oneTimeToken, setOneTimeToken] = useState<PairingTokenPayload | { runnerToken: string } | null>(null);
 
@@ -977,6 +1027,38 @@ function HarnessPanel({
     }
   };
 
+  const smokeOpenSandbox = async () => {
+    setPendingSandboxSmoke(true);
+    setError(null);
+    try {
+      const smoke = await runOpenSandboxSmoke(repoKey);
+      setSandboxPolicyState((current) =>
+        current
+          ? {
+              ...current,
+              sandboxProviderReadiness: {
+                ...(current.sandboxProviderReadiness ?? {}),
+                operations:
+                  smoke.operations ?? current.sandboxProviderReadiness?.operations,
+              },
+            }
+          : current,
+      );
+      setSandboxPolicyState(await fetchSandboxPolicy(repoKey));
+      window.dispatchEvent(new CustomEvent("symphonia:readinessUpdated"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not run OpenSandbox smoke");
+      try {
+        setSandboxPolicyState(await fetchSandboxPolicy(repoKey));
+        window.dispatchEvent(new CustomEvent("symphonia:readinessUpdated"));
+      } catch {
+        // Keep the visible smoke error if the follow-up refresh fails.
+      }
+    } finally {
+      setPendingSandboxSmoke(false);
+    }
+  };
+
   const providers = status?.providerReadiness?.providers ?? [];
   const runnableProvider = providers.find((provider) => provider.id === "codex_app_server");
   const canRunCodex = runnableProvider ? canHarnessRunProvider(runnableProvider) : false;
@@ -1075,8 +1157,10 @@ function HarnessPanel({
         sandboxPolicy={sandboxPolicy}
         pendingRemotePolicy={pendingRemotePolicy}
         pendingSandboxPolicy={pendingSandboxPolicy}
+        pendingSandboxSmoke={pendingSandboxSmoke}
         onToggleRemotePolicy={toggleRemotePolicy}
         onToggleSandboxPolicy={toggleSandboxPolicy}
+        onSmokeOpenSandbox={smokeOpenSandbox}
         pendingAction={pendingRunnerAction}
         onAction={runRunnerAction}
         onPairRunner={pairRunner}
@@ -1169,8 +1253,10 @@ function RunnerCapacitySection({
   sandboxPolicy,
   pendingRemotePolicy,
   pendingSandboxPolicy,
+  pendingSandboxSmoke,
   onToggleRemotePolicy,
   onToggleSandboxPolicy,
+  onSmokeOpenSandbox,
   pendingAction,
   onAction,
   onPairRunner,
@@ -1183,8 +1269,10 @@ function RunnerCapacitySection({
   sandboxPolicy: SandboxPolicy | null;
   pendingRemotePolicy: boolean;
   pendingSandboxPolicy: boolean;
+  pendingSandboxSmoke: boolean;
   onToggleRemotePolicy: () => void;
   onToggleSandboxPolicy: () => void;
+  onSmokeOpenSandbox: () => void;
   pendingAction: string | null;
   onAction: (runner: RunnerStatusRow, action: RunnerAction) => void;
   onPairRunner: () => void;
@@ -1196,11 +1284,13 @@ function RunnerCapacitySection({
   const remoteAllowed = remotePolicy?.remoteExecutionAllowed === true;
   const sandboxAllowed = sandboxPolicy?.sandboxExecutionAllowed === true;
   const sandboxReadiness = sandboxPolicy?.sandboxProviderReadiness;
+  const sandboxOperations = sandboxReadiness?.operations;
   const sandboxProvider = sandboxReadiness?.provider ?? sandboxPolicy?.sandboxProvider;
   const sandboxProviderAllowed =
     !!sandboxProvider && (remotePolicy?.allowedSandboxProviders ?? []).includes(sandboxProvider);
   const policyDisabledReason = disabledReason(access, "repository.configure");
   const sandboxDisabledReason = disabledReason(access, "sandbox.configure");
+  const smokeDisabledReason = disabledReason(access, "sandbox.configure");
 
   return (
     <div className="border-t px-3 py-3">
@@ -1337,23 +1427,51 @@ function RunnerCapacitySection({
                 {sandboxReadiness?.workspaceMode === "source_bundle" && (
                   <StatusPill tone="neutral" label="Source bundle" />
                 )}
+                {sandboxReadiness?.credentialMode === "source_bundle" && (
+                  <StatusPill tone="neutral" label="No Git credentials" />
+                )}
+                <StatusPill
+                  tone={sandboxSmokeTone(sandboxOperations)}
+                  label={sandboxSmokeLabel(sandboxOperations)}
+                />
+                {sandboxOperations?.cleanupWarning && (
+                  <StatusPill tone="warning" label="Cleanup warning" />
+                )}
               </div>
+              {sandboxOperations?.lastSmokeAt && (
+                <div className="mt-1 text-muted-foreground">
+                  Last smoke: {formatShortDate(sandboxOperations.lastSmokeAt)}
+                  {sandboxOperations.reasonCode ? ` · ${sandboxOperations.reasonCode}` : ""}
+                </div>
+              )}
               {sandboxAllowed && (
                 <div className="mt-1 text-muted-foreground">
                   Symphonia still imports and validates sandbox changes locally before review.
                 </div>
               )}
             </div>
-            <button
-              type="button"
-              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={pendingSandboxPolicy || !canAccess(access, "sandbox.configure")}
-              title={sandboxDisabledReason}
-              onClick={onToggleSandboxPolicy}
-            >
-              {sandboxAllowed ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-              {pendingSandboxPolicy ? "Updating" : sandboxAllowed ? "Disable" : "Enable"}
-            </button>
+            <div className="flex shrink-0 flex-col gap-1 sm:flex-row">
+              <button
+                type="button"
+                className="inline-flex h-7 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={pendingSandboxSmoke || !canAccess(access, "sandbox.configure")}
+                title={smokeDisabledReason}
+                onClick={onSmokeOpenSandbox}
+              >
+                <RefreshCw className="h-3 w-3" />
+                {pendingSandboxSmoke ? "Running" : "Smoke"}
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-7 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={pendingSandboxPolicy || !canAccess(access, "sandbox.configure")}
+                title={sandboxDisabledReason}
+                onClick={onToggleSandboxPolicy}
+              >
+                {sandboxAllowed ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                {pendingSandboxPolicy ? "Updating" : sandboxAllowed ? "Disable" : "Enable"}
+              </button>
+            </div>
           </div>
         </div>
 

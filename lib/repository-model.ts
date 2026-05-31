@@ -137,7 +137,19 @@ export interface RepositorySummary {
     label?: string;
     credential?: string;
     workspaceMode?: string;
+    credentialMode?: string;
     egressMode?: string;
+    operations?: {
+      provider?: string;
+      lastSmokeStatus?: "passed" | "failed" | "never_run" | "running" | string;
+      lastSmokeAt?: string;
+      reasonCode?: string;
+      cleanupWarning?: boolean;
+      workspaceMode?: string;
+      lastCleanupStatus?: string;
+      lastCleanupAt?: string;
+      lastCleanupReasonCode?: string;
+    };
   };
   allowedRunnerIds?: string[];
   allowedSandboxProviders?: string[];

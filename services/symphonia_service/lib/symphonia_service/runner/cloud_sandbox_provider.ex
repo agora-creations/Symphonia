@@ -10,7 +10,7 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
   alias SymphoniaService.Access.{Actor, AuditLog}
   alias SymphoniaService.CodingAssistant.RunStore
   alias SymphoniaService.Runners.{AssignmentStore, Assignments}
-  alias SymphoniaService.Sandbox.{Policy, Registry, Session}
+  alias SymphoniaService.Sandbox.{OpenSandboxOperations, OpenSandboxProvider, Policy, Registry, Session}
   alias SymphoniaService.TaskStore
 
   def runner_metadata(repository), do: Policy.runner_metadata(repository)
@@ -150,10 +150,12 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
 
     case provider.release(session) do
       :ok ->
+        record_opensandbox_cleanup(provider, registry_path, repository, :ok)
         audit(registry_path, repository, actor, "sandbox.release_completed", assignment, "completed")
         :ok
 
       {:error, reason} ->
+        record_opensandbox_cleanup(provider, registry_path, repository, {:error, reason})
         audit(registry_path, repository, actor, "sandbox.release_failed", assignment, "failed",
           reasonCode: "sandbox_release_failed"
         )
@@ -178,6 +180,15 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
 
     :ok
   end
+
+  defp record_opensandbox_cleanup(OpenSandboxProvider, registry_path, repository, result) do
+    OpenSandboxOperations.record_cleanup(registry_path, repository, result)
+    :ok
+  rescue
+    _error -> :ok
+  end
+
+  defp record_opensandbox_cleanup(_provider, _registry_path, _repository, _result), do: :ok
 
   defp fail_assignment(registry_path, repository, task, assignment, reason, release_result) do
     failure_class = safe_reason(reason)

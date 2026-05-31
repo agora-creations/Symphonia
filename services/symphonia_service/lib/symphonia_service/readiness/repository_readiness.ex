@@ -499,6 +499,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
   defp sandbox_checks(repository, registry_path) do
     policy_enabled? = SandboxPolicy.allowed?(repository)
     readiness = SandboxRegistry.readiness(repository, registry_path)
+    operations = readiness["operations"] || %{}
     provider_configured? = readiness["configured"] == true
     provider = SandboxRegistry.provider_id(repository)
     provider_allowed? = RepositoryPolicy.sandbox_provider_allowed?(repository, provider)
@@ -555,6 +556,30 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
         end
       ),
       check(
+        "sandbox.source_bundle",
+        "Sandbox source bundle",
+        source_bundle_status(provider, readiness),
+        "sandbox",
+        source_bundle_detail(provider, readiness)
+      ),
+      check(
+        "sandbox.opensandbox_smoke",
+        "OpenSandbox smoke",
+        smoke_status(operations),
+        "sandbox",
+        smoke_detail(operations)
+      ),
+      check(
+        "sandbox.cleanup",
+        "Sandbox cleanup",
+        if(operations["cleanupWarning"] == true, do: "warning", else: "passed"),
+        "sandbox",
+        if(operations["cleanupWarning"] == true,
+          do: "OpenSandbox cleanup needs attention.",
+          else: "No OpenSandbox cleanup warning is active."
+        )
+      ),
+      check(
         "sandbox.manual_only",
         "Sandbox mode",
         "passed",
@@ -578,6 +603,35 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
 
   defp sandbox_readiness_message(_readiness),
     do: "Sandbox execution is enabled but no provider is configured."
+
+  defp source_bundle_status("opensandbox", %{"workspaceMode" => "source_bundle"}), do: "passed"
+  defp source_bundle_status("opensandbox", _readiness), do: "warning"
+  defp source_bundle_status(_provider, _readiness), do: "not_checked"
+
+  defp source_bundle_detail("opensandbox", %{"workspaceMode" => "source_bundle"}),
+    do: "Source-bundle mode is enabled."
+
+  defp source_bundle_detail("opensandbox", _readiness),
+    do: "OpenSandbox source-bundle mode is not enabled."
+
+  defp source_bundle_detail(_provider, _readiness),
+    do: "Source-bundle mode applies to OpenSandbox."
+
+  defp smoke_status(%{"lastSmokeStatus" => "passed"}), do: "passed"
+  defp smoke_status(%{"lastSmokeStatus" => "failed"}), do: "warning"
+  defp smoke_status(%{"lastSmokeStatus" => "running"}), do: "not_checked"
+  defp smoke_status(_operations), do: "not_checked"
+
+  defp smoke_detail(%{"lastSmokeStatus" => "passed"}), do: "OpenSandbox fixture smoke passed."
+
+  defp smoke_detail(%{"lastSmokeStatus" => "failed", "reasonCode" => reason})
+       when is_binary(reason),
+       do: "OpenSandbox fixture smoke failed: #{reason}."
+
+  defp smoke_detail(%{"lastSmokeStatus" => "running"}),
+    do: "OpenSandbox fixture smoke is running."
+
+  defp smoke_detail(_operations), do: "OpenSandbox fixture smoke has not been run."
 
   defp secret_checks(repository, registry_path) do
     references = SecretReferences.list(registry_path, repository)

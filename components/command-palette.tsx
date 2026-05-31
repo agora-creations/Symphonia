@@ -12,13 +12,11 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Activity,
   Folder,
   GitBranch,
   LayoutGrid,
   List as ListIcon,
   Plus,
-  ScrollText,
   Search,
   ShieldCheck,
   Sparkles,
@@ -172,22 +170,6 @@ export function CommandPaletteProvider({
           run: () => router.push(`/r/${s}/decisions`),
         },
         {
-          id: "nav-reviews",
-          label: "Reviews",
-          hint: repoForActions,
-          group: "Navigate",
-          icon: <ScrollText className="h-3.5 w-3.5" />,
-          run: () => router.push(`/r/${s}/reviews`),
-        },
-        {
-          id: "nav-runs",
-          label: "Run Summaries",
-          hint: repoForActions,
-          group: "Navigate",
-          icon: <Activity className="h-3.5 w-3.5" />,
-          run: () => router.push(`/r/${s}/run-summaries`),
-        },
-        {
           id: "create-task",
           label: "New Task",
           hint: "Create a task",
@@ -204,36 +186,12 @@ export function CommandPaletteProvider({
           run: () => onNewDraft?.(repoForActions, "project"),
         },
         {
-          id: "create-doc",
-          label: "New Doc",
-          hint: "Opens an editable draft",
-          group: "Create",
-          icon: <Plus className="h-3.5 w-3.5" />,
-          run: () => onNewDraft?.(repoForActions, "doc"),
-        },
-        {
           id: "create-decision",
           label: "New Decision",
           hint: "Opens an editable draft",
           group: "Create",
           icon: <Plus className="h-3.5 w-3.5" />,
           run: () => onNewDraft?.(repoForActions, "decision"),
-        },
-        {
-          id: "create-review",
-          label: "New Review",
-          hint: "Opens an editable draft",
-          group: "Create",
-          icon: <Plus className="h-3.5 w-3.5" />,
-          run: () => onNewDraft?.(repoForActions, "review"),
-        },
-        {
-          id: "create-run",
-          label: "New Run Summary",
-          hint: "Opens an editable draft",
-          group: "Create",
-          icon: <Plus className="h-3.5 w-3.5" />,
-          run: () => onNewDraft?.(repoForActions, "run-summary"),
         },
         {
           id: "action-clarise",

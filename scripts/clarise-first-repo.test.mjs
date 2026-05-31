@@ -79,6 +79,11 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
   assert.doesNotMatch(palette, /id: "nav-tasks"/);
   assert.doesNotMatch(palette, /id: "nav-projects"/);
   assert.doesNotMatch(palette, /id: "nav-docs"/);
+  assert.doesNotMatch(palette, /id: "nav-reviews"/);
+  assert.doesNotMatch(palette, /id: "nav-runs"/);
+  assert.doesNotMatch(palette, /id: "create-doc"/);
+  assert.doesNotMatch(palette, /id: "create-review"/);
+  assert.doesNotMatch(palette, /id: "create-run"/);
   assert.doesNotMatch(palette, /pages\.forEach/);
   assert.doesNotMatch(palette, /Search repositories, pages, or actions/);
 });

@@ -69,6 +69,20 @@ const runnerCompiled = ts.transpileModule(runnerSource, {
 const runnerCompiledPath = join(tempDir, "runner-model.cjs");
 await writeFile(runnerCompiledPath, runnerCompiled.outputText);
 
+const sandboxSource = await readFile(
+  new URL("../lib/sandbox-ui-model.ts", import.meta.url),
+  "utf8",
+);
+const sandboxCompiled = ts.transpileModule(sandboxSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+    importsNotUsedAsValues: ts.ImportsNotUsedAsValues.Remove,
+  },
+});
+const sandboxCompiledPath = join(tempDir, "sandbox-ui-model.cjs");
+await writeFile(sandboxCompiledPath, sandboxCompiled.outputText);
+
 const require = createRequire(import.meta.url);
 const {
   activeRunPollingTarget,
@@ -134,6 +148,12 @@ const {
   runnerTrustDetail,
 } = require(runnerCompiledPath);
 
+const {
+  sandboxCleanupLabel,
+  sandboxSmokeLabel,
+  sandboxSmokeTone,
+} = require(sandboxCompiledPath);
+
 function task(attrs = {}) {
   return {
     key: "SYM-1",
@@ -176,6 +196,17 @@ test("automation and daemon labels reflect enabled and disabled states", () => {
       pause: [],
     },
   );
+});
+
+test("sandbox operations labels stay public-safe", () => {
+  assert.equal(sandboxSmokeLabel({ lastSmokeStatus: "passed" }), "Smoke passed");
+  assert.equal(sandboxSmokeTone({ lastSmokeStatus: "passed" }), "ready");
+  assert.equal(sandboxSmokeLabel({ lastSmokeStatus: "failed" }), "Smoke failed");
+  assert.equal(sandboxSmokeTone({ lastSmokeStatus: "failed" }), "warning");
+  assert.equal(sandboxSmokeLabel({ lastSmokeStatus: "never_run" }), "Smoke never run");
+  assert.equal(sandboxSmokeTone({ lastSmokeStatus: "never_run" }), "neutral");
+  assert.equal(sandboxCleanupLabel({ cleanupWarning: true }), "Cleanup warning");
+  assert.equal(sandboxCleanupLabel({ cleanupWarning: false }), "Cleanup clear");
 });
 
 test("task badges expose eligibility reasons and active run states", () => {
