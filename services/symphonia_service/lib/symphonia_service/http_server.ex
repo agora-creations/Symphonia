@@ -264,7 +264,11 @@ defmodule SymphoniaService.HTTPServer do
 
       ["api", "repositories", repo, "sandbox-policy"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
-        {200, %{"repo" => repository["key"], "policy" => SandboxPolicy.public(repository)}}
+        {200,
+         %{
+           "repo" => repository["key"],
+           "policy" => SandboxPolicy.public(repository, registry_path)
+         }}
 
       ["api", "repositories", repo, "secret-references"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -1075,7 +1079,24 @@ defmodule SymphoniaService.HTTPServer do
               }
             })
 
-            {200, %{"repo" => repository["key"], "policy" => SandboxPolicy.public(repository)}}
+            if SandboxPolicy.provider(repository) == "opensandbox" do
+              AuditLog.record(registry_path, repository, %{
+                "actor" => actor,
+                "action" => "sandbox.provider_configured",
+                "target" => repository_target(),
+                "result" => "completed",
+                "metadata" => %{
+                  "provider" => "opensandbox",
+                  "workspaceProvider" => "cloud_sandbox"
+                }
+              })
+            end
+
+            {200,
+             %{
+               "repo" => repository["key"],
+               "policy" => SandboxPolicy.public(repository, registry_path)
+             }}
           end
         )
 
@@ -1828,6 +1849,7 @@ defmodule SymphoniaService.HTTPServer do
       "remoteExecutionAllowed" => RepositoryPolicy.remote_execution_allowed?(repository),
       "sandboxExecutionAllowed" => SandboxPolicy.allowed?(repository),
       "sandboxProvider" => SandboxPolicy.provider(repository),
+      "sandboxProviderReadiness" => SymphoniaService.Sandbox.Registry.readiness(repository, nil),
       "allowedRunnerIds" => RepositoryPolicy.allowed_runner_ids(repository),
       "allowedSandboxProviders" => RepositoryPolicy.allowed_sandbox_providers(repository),
       "requireTrustedRunner" => true,

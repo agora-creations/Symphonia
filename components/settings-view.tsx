@@ -474,6 +474,19 @@ interface SandboxPolicy {
   sandboxExecutionAllowed: boolean;
   sandboxProvider?: string | null;
   sandboxProviderLabel?: string;
+  sandboxProviderReadiness?: SandboxProviderReadiness;
+}
+
+interface SandboxProviderReadiness {
+  configured?: boolean;
+  ready?: boolean;
+  status?: string;
+  reason?: string | null;
+  provider?: string | null;
+  label?: string;
+  credential?: string;
+  workspaceMode?: string;
+  egressMode?: string;
 }
 
 interface SecretReference {
@@ -953,7 +966,7 @@ function HarnessPanel({
       const allowed = !(sandboxPolicy?.sandboxExecutionAllowed ?? false);
       const nextPolicy = await setSandboxPolicy(repoKey, {
         sandboxExecutionAllowed: allowed,
-        sandboxProvider: allowed ? (sandboxPolicy?.sandboxProvider ?? "fake_sandbox") : null,
+        sandboxProvider: allowed ? (sandboxPolicy?.sandboxProvider ?? "opensandbox") : null,
       });
       setSandboxPolicyState(nextPolicy);
       window.dispatchEvent(new CustomEvent("symphonia:readinessUpdated"));
@@ -1182,6 +1195,10 @@ function RunnerCapacitySection({
   const remote = runners?.remote ?? [];
   const remoteAllowed = remotePolicy?.remoteExecutionAllowed === true;
   const sandboxAllowed = sandboxPolicy?.sandboxExecutionAllowed === true;
+  const sandboxReadiness = sandboxPolicy?.sandboxProviderReadiness;
+  const sandboxProvider = sandboxReadiness?.provider ?? sandboxPolicy?.sandboxProvider;
+  const sandboxProviderAllowed =
+    !!sandboxProvider && (remotePolicy?.allowedSandboxProviders ?? []).includes(sandboxProvider);
   const policyDisabledReason = disabledReason(access, "repository.configure");
   const sandboxDisabledReason = disabledReason(access, "sandbox.configure");
 
@@ -1300,7 +1317,26 @@ function RunnerCapacitySection({
                 </span>
               </div>
               <div className="mt-1 text-muted-foreground">
-                Provider: {sandboxPolicy?.sandboxProviderLabel ?? "Not configured"} · Mode: Manual only
+                Provider: {sandboxPolicy?.sandboxProviderLabel ?? sandboxReadiness?.label ?? "Not configured"} · Mode: Manual only
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                <StatusPill
+                  tone={sandboxReadiness?.ready ? "ready" : sandboxReadiness?.configured ? "warning" : "neutral"}
+                  label={
+                    sandboxReadiness?.ready
+                      ? "Configured"
+                      : sandboxReadiness?.configured
+                        ? "Blocked"
+                        : "Missing credential"
+                  }
+                />
+                <StatusPill
+                  tone={sandboxProviderAllowed ? "ready" : "neutral"}
+                  label={sandboxProviderAllowed ? "Allowed for repository" : "Not allowlisted"}
+                />
+                {sandboxReadiness?.workspaceMode === "source_bundle" && (
+                  <StatusPill tone="neutral" label="Source bundle" />
+                )}
               </div>
               {sandboxAllowed && (
                 <div className="mt-1 text-muted-foreground">

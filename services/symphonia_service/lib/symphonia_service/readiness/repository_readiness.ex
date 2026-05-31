@@ -528,7 +528,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
             "#{readiness["label"] || "Sandbox provider"} is configured."
 
           policy_enabled? ->
-            "Sandbox execution is enabled but no provider is configured."
+            sandbox_readiness_message(readiness)
 
           true ->
           "Sandbox provider is not configured."
@@ -563,6 +563,21 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
       )
     ]
   end
+
+  defp sandbox_readiness_message(%{"reason" => "opensandbox_endpoint_missing"}),
+    do: "OpenSandbox endpoint configuration is missing."
+
+  defp sandbox_readiness_message(%{"reason" => "opensandbox_api_key_reference_missing"}),
+    do: "OpenSandbox API key secret reference is missing."
+
+  defp sandbox_readiness_message(%{"reason" => "opensandbox_api_key_missing"}),
+    do: "OpenSandbox API key environment reference is missing."
+
+  defp sandbox_readiness_message(%{"label" => label}) when is_binary(label),
+    do: "#{label} is not ready for sandbox execution."
+
+  defp sandbox_readiness_message(_readiness),
+    do: "Sandbox execution is enabled but no provider is configured."
 
   defp secret_checks(repository, registry_path) do
     references = SecretReferences.list(registry_path, repository)

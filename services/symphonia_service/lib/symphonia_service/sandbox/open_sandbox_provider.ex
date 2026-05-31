@@ -10,7 +10,7 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
   @behaviour SymphoniaService.Sandbox.Provider
 
   alias SymphoniaService.Runners.PatchBundle
-  alias SymphoniaService.Sandbox.{OpenSandboxConfig, Result, Session}
+  alias SymphoniaService.Sandbox.{OpenSandboxConfig, Session}
 
   @execd_port 44_772
 
@@ -362,7 +362,7 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
     end
   end
 
-  defp to_integer(value, default) when is_integer(value), do: value
+  defp to_integer(value, _default) when is_integer(value), do: value
 
   defp to_integer(value, default) do
     case Integer.parse(to_string(value || "")) do

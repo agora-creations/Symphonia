@@ -128,6 +128,17 @@ export interface RepositorySummary {
   remoteExecutionAllowed?: boolean;
   sandboxExecutionAllowed?: boolean;
   sandboxProvider?: string | null;
+  sandboxProviderReadiness?: {
+    configured?: boolean;
+    ready?: boolean;
+    status?: string;
+    reason?: string | null;
+    provider?: string | null;
+    label?: string;
+    credential?: string;
+    workspaceMode?: string;
+    egressMode?: string;
+  };
   allowedRunnerIds?: string[];
   allowedSandboxProviders?: string[];
   requireTrustedRunner?: boolean;

@@ -16,9 +16,10 @@ defmodule SymphoniaService.CodingAssistant do
     RunSupervisor
   }
 
-  alias SymphoniaService.Access.Actor
+  alias SymphoniaService.Access.{Actor, AuditLog}
   alias SymphoniaService.Runner.CloudSandboxProvider
   alias SymphoniaService.Runners.{Assignments, AssignmentStore, LocalService, SelectionPolicy}
+  alias SymphoniaService.Sandbox.Registry
   alias SymphoniaService.Sandbox.Policy, as: SandboxPolicy
   alias SymphoniaService.TaskStore
 
@@ -420,12 +421,51 @@ defmodule SymphoniaService.CodingAssistant do
 
   defp sandbox_preflight!(registry_path, repository, task, params) do
     actor = Map.get(params, "actor", Actor.default())
+    readiness = Registry.readiness(repository, registry_path)
+
+    AuditLog.record(registry_path, repository, %{
+      "actor" => actor,
+      "action" => "sandbox.provider_readiness_checked",
+      "target" => %{"type" => "repository", "id" => repository["key"]},
+      "result" => if(readiness["ready"] == true, do: "completed", else: "failed"),
+      "metadata" => %{
+        "provider" => SandboxPolicy.provider(repository),
+        "workspaceProvider" => "cloud_sandbox",
+        "reasonCode" => readiness["reason"]
+      }
+    })
 
     case SandboxPolicy.authorize_run(registry_path, repository, actor, task, params) do
-      :ok -> :ok
-      {:error, {_status, %{"error" => message}}} -> raise ArgumentError, message
-      {:error, reason} -> raise ArgumentError, to_string(reason)
+      :ok ->
+        :ok
+
+      {:error, {_status, %{"error" => message} = payload}} ->
+        audit_sandbox_denied(registry_path, repository, actor, task, payload["reasonCode"])
+        raise ArgumentError, message
+
+      {:error, reason} ->
+        audit_sandbox_denied(registry_path, repository, actor, task, reason)
+        raise ArgumentError, to_string(reason)
     end
+  end
+
+  defp audit_sandbox_denied(registry_path, repository, actor, task, reason) do
+    AuditLog.record(registry_path, repository, %{
+      "actor" => actor,
+      "action" => "sandbox.run_denied",
+      "target" => %{"type" => "task", "id" => task["key"]},
+      "result" => "denied",
+      "metadata" => %{
+        "taskKey" => task["key"],
+        "provider" => SandboxPolicy.provider(repository),
+        "workspaceProvider" => "cloud_sandbox",
+        "reasonCode" => reason
+      }
+    })
+
+    :ok
+  rescue
+    _error -> :ok
   end
 
   defp previous_codex_thread_id(task) do
