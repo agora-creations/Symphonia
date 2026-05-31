@@ -16,12 +16,29 @@ defmodule SymphoniaService.Runners.FakeRunner do
     Map.merge(
       %{
         "name" => "fake-runner",
-        "registrationToken" => "fake-runner-token",
         "capabilities" => capabilities(),
         "limits" => %{"maxConcurrentRuns" => 1}
       },
       attrs
     )
+  end
+
+  def register!(registry_path, actor, attrs \\ %{}) do
+    {:ok, _pairing, pairing_token} =
+      SymphoniaService.Runners.Pairing.create(registry_path, actor, %{
+        "name" => attrs["name"] || "fake-runner",
+        "expiresInMinutes" => 15
+      })
+
+    {:ok, runner, runner_token} =
+      SymphoniaService.Runners.Registry.register(
+        registry_path,
+        actor,
+        registration_attrs(attrs) |> Map.put("pairingToken", pairing_token)
+      )
+
+    {:ok, runner, _meta} = SymphoniaService.Runners.Registry.approve(registry_path, runner["id"])
+    {runner, runner_token}
   end
 
   def patch_bundle_fixture(

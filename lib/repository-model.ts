@@ -128,6 +128,10 @@ export interface RepositorySummary {
   remoteExecutionAllowed?: boolean;
   sandboxExecutionAllowed?: boolean;
   sandboxProvider?: string | null;
+  allowedRunnerIds?: string[];
+  allowedSandboxProviders?: string[];
+  requireTrustedRunner?: boolean;
+  secretScopesAllowed?: string[];
   last_task_number?: number;
   lastTaskNumber?: number;
   taskCount?: number;
@@ -270,6 +274,7 @@ export type RepositoryReadinessCategory =
   | "provider"
   | "runner"
   | "sandbox"
+  | "secrets"
   | "validation"
   | "github"
   | "review";

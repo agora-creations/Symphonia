@@ -17,6 +17,9 @@ defmodule SymphoniaService.Runners.LocalService do
       "name" => "Local service",
       "mode" => "local_service",
       "status" => "online",
+      "healthState" => "online",
+      "trustState" => "local_service",
+      "tokenState" => "active",
       "lastHeartbeatAt" => now(),
       "capabilities" => %{
         "codexAppServer" => codex["ready"] == true,

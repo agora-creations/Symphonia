@@ -7,8 +7,9 @@ export async function GET(
   { params }: { params: Promise<{ repoKey: string }> },
 ) {
   const { repoKey } = await params;
+
   return proxyToSymphoniaService(
-    `/api/repositories/${encodeURIComponent(repoKey)}/remote-execution`,
+    `/api/repositories/${encodeURIComponent(repoKey)}/secret-references`,
     {},
     request,
   );
@@ -19,8 +20,9 @@ export async function POST(
   { params }: { params: Promise<{ repoKey: string }> },
 ) {
   const { repoKey } = await params;
+
   return proxyToSymphoniaService(
-    `/api/repositories/${encodeURIComponent(repoKey)}/remote-execution`,
+    `/api/repositories/${encodeURIComponent(repoKey)}/secret-references`,
     { method: "POST", body: await jsonBody(request) },
     request,
   );

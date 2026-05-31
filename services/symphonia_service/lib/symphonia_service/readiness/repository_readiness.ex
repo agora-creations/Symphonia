@@ -11,14 +11,16 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
   alias SymphoniaService.CodingAssistant.ProviderCatalog
   alias SymphoniaService.Harness.{Automation, Daemon}
   alias SymphoniaService.Readiness.RepositoryScanner
+  alias SymphoniaService.Runners.RepositoryPolicy
   alias SymphoniaService.Runners.Registry, as: RunnerRegistry
   alias SymphoniaService.Runner.WorkspaceProviders
   alias SymphoniaService.Sandbox.Policy, as: SandboxPolicy
   alias SymphoniaService.Sandbox.Registry, as: SandboxRegistry
+  alias SymphoniaService.Secrets.ReferenceStore, as: SecretReferences
   alias SymphoniaService.Validation.Policy, as: ValidationPolicy
   alias SymphoniaService.{SpecWorkspace, TaskStore, Workspace}
 
-  @categories ~w(workspace planning automation provider runner sandbox validation github review)
+  @categories ~w(workspace planning automation provider runner sandbox secrets validation github review)
 
   def get(repository, opts \\ []) do
     registry_path = Keyword.get(opts, :registry_path, SymphoniaService.default_registry_path())
@@ -31,6 +33,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
       |> Kernel.++(provider_checks())
       |> Kernel.++(runner_checks(repository, registry_path))
       |> Kernel.++(sandbox_checks(repository))
+      |> Kernel.++(secret_checks(repository, registry_path))
       |> Kernel.++(validation_checks(repository))
       |> Kernel.++(github_checks(repository))
       |> Kernel.++(review_checks(repository))
@@ -390,7 +393,11 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
     remote = runners["remote"] || []
 
     remote_execution_allowed? =
-      SymphoniaService.Runners.RepositoryPolicy.remote_execution_allowed?(repository)
+      RepositoryPolicy.remote_execution_allowed?(repository)
+
+    allowed_runner_ids = RepositoryPolicy.allowed_runner_ids(repository)
+    trusted_remote = Enum.filter(remote, &(&1["trustState"] == "trusted"))
+    pending_remote = Enum.filter(remote, &(&1["trustState"] == "pending"))
 
     capabilities = local["capabilities"] || %{}
 
@@ -435,6 +442,56 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
           do: "No remote runners are registered. Local service remains available.",
           else: "At least one remote runner is registered."
         )
+      ),
+      check(
+        "runner.trust",
+        "Runner trust",
+        cond do
+          remote_execution_allowed? and trusted_remote == [] -> "failed"
+          trusted_remote == [] -> "warning"
+          true -> "passed"
+        end,
+        "runner",
+        cond do
+          remote_execution_allowed? and trusted_remote == [] ->
+            "Remote execution is enabled but no trusted remote runner is available."
+
+          trusted_remote == [] ->
+            "No trusted remote runners. Local service remains available."
+
+          true ->
+            "At least one remote runner is trusted."
+        end
+      ),
+      check(
+        "runner.allowed_for_repository",
+        "Repository runner allowlist",
+        cond do
+          remote_execution_allowed? and allowed_runner_ids == [] -> "failed"
+          allowed_runner_ids == [] -> "warning"
+          true -> "passed"
+        end,
+        "runner",
+        cond do
+          remote_execution_allowed? and allowed_runner_ids == [] ->
+            "Remote execution is enabled but no runner IDs are allowed for this repository."
+
+          allowed_runner_ids == [] ->
+            "No remote runners are allowlisted for this repository."
+
+          true ->
+            "Remote runner allowlist is configured."
+        end
+      ),
+      check(
+        "runner.pending_approval",
+        "Pending runner approval",
+        if(pending_remote == [], do: "passed", else: "warning"),
+        "runner",
+        if(pending_remote == [],
+          do: "No remote runners are pending approval.",
+          else: "One or more remote runners are connected but pending owner approval."
+        )
       )
     ]
   end
@@ -443,6 +500,8 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
     policy_enabled? = SandboxPolicy.allowed?(repository)
     readiness = SandboxRegistry.readiness(repository)
     provider_configured? = readiness["configured"] == true
+    provider = SandboxRegistry.provider_id(repository)
+    provider_allowed? = RepositoryPolicy.sandbox_provider_allowed?(repository, provider)
 
     [
       check(
@@ -472,7 +531,27 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
             "Sandbox execution is enabled but no provider is configured."
 
           true ->
-            "Sandbox provider is not configured."
+          "Sandbox provider is not configured."
+        end
+      ),
+      check(
+        "sandbox.provider_allowed",
+        "Sandbox provider allowlist",
+        cond do
+          policy_enabled? and not provider_allowed? -> "failed"
+          provider_allowed? -> "passed"
+          true -> "not_checked"
+        end,
+        "sandbox",
+        cond do
+          policy_enabled? and not provider_allowed? ->
+            "Sandbox execution is enabled but the provider is not allowed by repository policy."
+
+          provider_allowed? ->
+            "Sandbox provider is allowed by repository policy."
+
+          true ->
+            "No sandbox provider is allowlisted for this repository."
         end
       ),
       check(
@@ -481,6 +560,44 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
         "passed",
         "sandbox",
         "Sandbox execution is manual only."
+      )
+    ]
+  end
+
+  defp secret_checks(repository, registry_path) do
+    references = SecretReferences.list(registry_path, repository)
+    allowed_scopes = RepositoryPolicy.secret_scopes_allowed(repository)
+    configured_scopes = references |> Enum.filter(&(&1["configured"] == true)) |> Enum.map(& &1["scope"])
+
+    missing_allowed_scopes = allowed_scopes -- configured_scopes
+
+    [
+      check(
+        "secrets.remote_default",
+        "Remote execution secrets",
+        "passed",
+        "secrets",
+        "No secrets are passed to remote execution by default."
+      ),
+      check(
+        "secrets.references",
+        "Secret references",
+        cond do
+          allowed_scopes != [] and missing_allowed_scopes != [] -> "failed"
+          references == [] -> "warning"
+          true -> "passed"
+        end,
+        "secrets",
+        cond do
+          allowed_scopes != [] and missing_allowed_scopes != [] ->
+            "One or more allowed secret scopes are missing configured environment references."
+
+          references == [] ->
+            "No secret references are configured."
+
+          true ->
+            "Secret references are configured as environment-backed metadata."
+        end
       )
     ]
   end

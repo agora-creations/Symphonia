@@ -264,6 +264,10 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
       "sandboxExecutionAllowed" => true,
       "sandboxProvider" => "fake_sandbox"
     })
+
+    SymphoniaService.Runners.RepositoryPolicy.update_policy(registry_path, "SYM", %{
+      "allowedSandboxProviders" => ["fake_sandbox"]
+    })
   end
 
   defp create_task(registry_path, repository, title) do

@@ -131,6 +131,7 @@ const {
   runnerCapacityLabel,
   runnerStatusLabel,
   runnerStatusTone,
+  runnerTrustDetail,
 } = require(runnerCompiledPath);
 
 function task(attrs = {}) {
@@ -768,7 +769,14 @@ test("provider helpers label runnable and future providers", () => {
 });
 
 test("access helpers map V1 roles to permissions and disabled copy", () => {
-  const viewer = { role: "viewer", permissions: { "repository.view": true, "runner.view": true } };
+  const viewer = {
+    role: "viewer",
+    permissions: {
+      "repository.view": true,
+      "runner.view": true,
+      "secret_reference.view": true,
+    },
+  };
   const reviewer = {
     role: "reviewer",
     permissions: {
@@ -795,10 +803,12 @@ test("access helpers map V1 roles to permissions and disabled copy", () => {
   );
   assert.equal(canAccess(viewer, "task.run_codex"), false);
   assert.equal(canAccess(viewer, "runner.view"), true);
+  assert.equal(canAccess(viewer, "secret_reference.view"), true);
   assert.equal(canAccess(reviewer, "review.approve"), true);
   assert.equal(canAccess(reviewer, "pull_request.open"), false);
   assert.equal(canAccess(operator, "harness.pause"), true);
   assert.equal(canAccess(operator, "runner.use_remote"), false);
+  assert.equal(canAccess(operator, "runner.approve"), false);
   assert.equal(canAccess(operator, "sandbox.run"), false);
   assert.equal(canAccess(operator, "review.approve"), false);
   assert.equal(disabledReason(viewer, "task.run_codex"), "You have read-only access.");
@@ -864,6 +874,13 @@ test("runner UI helpers map status, capacity, and capability summaries", () => {
   assert.equal(runnerStatusTone({ ...remote, status: "stale" }), "warning");
   assert.equal(runnerStatusTone({ ...remote, status: "offline" }), "blocked");
   assert.equal(runnerStatusTone({ ...remote, status: "disabled" }), "neutral");
+  assert.equal(runnerStatusLabel({ ...remote, trustState: "pending" }), "Pending approval");
+  assert.equal(runnerStatusLabel({ ...remote, trustState: "trusted" }), "Trusted · Online");
+  assert.equal(runnerStatusLabel({ ...remote, trustState: "revoked" }), "Revoked");
+  assert.equal(
+    runnerTrustDetail({ ...remote, trustState: "pending" }),
+    "Runner is connected but cannot execute until an owner approves it.",
+  );
 });
 
 test("Next service proxy forwards only safe actor headers", async () => {

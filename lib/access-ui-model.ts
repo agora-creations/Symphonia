@@ -35,9 +35,17 @@ export type PermissionKey =
   | "workspace_provider.experimental_run"
   | "runner.view"
   | "runner.register"
+  | "runner.pair"
+  | "runner.approve"
   | "runner.enable"
   | "runner.disable"
-  | "runner.use_remote";
+  | "runner.revoke"
+  | "runner.rotate_token"
+  | "runner.use_remote"
+  | "secret_reference.view"
+  | "secret_reference.create"
+  | "secret_reference.delete"
+  | "secret_scope.configure";
 
 export interface RepositoryAccess {
   role: RepositoryRole;
@@ -55,7 +63,16 @@ export interface AuditEvent {
   repo: string;
   action: string;
   target?: {
-    type: "repository" | "task" | "run" | "review" | "pull_request" | "harness" | "workflow" | "runner";
+    type:
+      | "repository"
+      | "task"
+      | "run"
+      | "review"
+      | "pull_request"
+      | "harness"
+      | "workflow"
+      | "runner"
+      | "secret_reference";
     id?: string;
   };
   result: "allowed" | "denied" | "completed" | "failed";
@@ -98,9 +115,17 @@ const ROLE_PERMISSIONS: Record<RepositoryRole, PermissionKey[]> = {
     "workspace_provider.experimental_run",
     "runner.view",
     "runner.register",
+    "runner.pair",
+    "runner.approve",
     "runner.enable",
     "runner.disable",
+    "runner.revoke",
+    "runner.rotate_token",
     "runner.use_remote",
+    "secret_reference.view",
+    "secret_reference.create",
+    "secret_reference.delete",
+    "secret_scope.configure",
   ],
   maintainer: [
     "repository.view",
@@ -126,6 +151,7 @@ const ROLE_PERMISSIONS: Record<RepositoryRole, PermissionKey[]> = {
     "sandbox.run",
     "runner.view",
     "runner.use_remote",
+    "secret_reference.view",
   ],
   reviewer: [
     "repository.view",
@@ -133,6 +159,7 @@ const ROLE_PERMISSIONS: Record<RepositoryRole, PermissionKey[]> = {
     "review.request_changes",
     "pull_request.refresh",
     "runner.view",
+    "secret_reference.view",
   ],
   operator: [
     "repository.view",
@@ -144,8 +171,9 @@ const ROLE_PERMISSIONS: Record<RepositoryRole, PermissionKey[]> = {
     "task.cancel_run",
     "pull_request.refresh",
     "runner.view",
+    "secret_reference.view",
   ],
-  viewer: ["repository.view", "runner.view"],
+  viewer: ["repository.view", "runner.view", "secret_reference.view"],
 };
 
 export function roleLabel(role?: RepositoryRole | string): string {
@@ -205,10 +233,14 @@ export function disabledReason(
   }
   if (
     permission === "runner.register" ||
+    permission === "runner.pair" ||
+    permission === "runner.approve" ||
     permission === "runner.enable" ||
-    permission === "runner.disable"
+    permission === "runner.disable" ||
+    permission === "runner.revoke" ||
+    permission === "runner.rotate_token"
   ) {
-    return "Only owners can register or manage runners.";
+    return "Only owners can pair, approve, rotate, or manage runners.";
   }
   if (permission === "runner.use_remote") {
     return "Only maintainers and owners can use remote runners when repository policy allows it.";
@@ -218,6 +250,13 @@ export function disabledReason(
   }
   if (permission === "sandbox.run") {
     return "Only maintainers and owners can run sandbox execution when repository policy allows it.";
+  }
+  if (
+    permission === "secret_reference.create" ||
+    permission === "secret_reference.delete" ||
+    permission === "secret_scope.configure"
+  ) {
+    return "Only owners can configure secret references.";
   }
 
   return "You do not have permission for this action.";

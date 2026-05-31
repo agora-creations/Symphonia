@@ -44,7 +44,6 @@ type ArtifactResult = {
 type ClariseDataTypes = {
   artifact_result: { artifact: ArtifactResult };
   artifact_failure: { artifactKind: string; title: string; error: string };
-  extraction_fallback: { reason: string };
   missing_fields: { fields: { kind: string; field: string }[] };
   tool_call: { name: "create_private_artifact"; artifactKind: string; title: string };
   done: { createdCount: number; failedCount: number };
@@ -114,18 +113,14 @@ export async function POST(
       let failedCount = 0;
       let batchMilestoneId: string | undefined;
       const textId = "clarise-response";
+      const assistantText = visibleAssistantText(extraction.plan.assistantText);
 
       writer.write({ type: "start" });
-      writer.write({ type: "text-start", id: textId });
-      writer.write({ type: "text-delta", id: textId, delta: extraction.plan.assistantText });
-      writer.write({ type: "text-end", id: textId });
 
-      if (extraction.fallbackReason) {
-        writer.write({
-          type: "data-extraction_fallback",
-          id: "clarise-extraction-fallback",
-          data: { reason: extraction.fallbackReason },
-        });
+      if (assistantText) {
+        writer.write({ type: "text-start", id: textId });
+        writer.write({ type: "text-delta", id: textId, delta: assistantText });
+        writer.write({ type: "text-end", id: textId });
       }
 
       if (extraction.plan.missingFields.length > 0) {
@@ -220,7 +215,7 @@ async function extractPlanWithCodex(
   repoKey: string,
   messages: ClariseChatMessage[],
   modelProfile: ClariseModelProfile,
-): Promise<{ plan: ClarisePlan; fallbackReason?: string }> {
+): Promise<{ plan: ClarisePlan }> {
   try {
     const response = await serviceJson<ServiceExtractionResponse>(
       `/api/repositories/${encodeURIComponent(repoKey)}/clarise/extract`,
@@ -232,11 +227,9 @@ async function extractPlanWithCodex(
     const plan = normalizeClarisePlan(response.plan);
     if (!plan) throw new Error("Codex returned an unusable artifact plan.");
     return { plan };
-  } catch (error) {
+  } catch {
     return {
       plan: planClariseResponse(messages),
-      fallbackReason:
-        error instanceof Error ? error.message : "Codex artifact extraction failed.",
     };
   }
 }
@@ -305,15 +298,62 @@ function uiMessagesToClarise(messages: unknown): ClariseChatMessage[] {
 }
 
 function messageContent(message: Record<string, unknown>): string {
-  if (typeof message.content === "string") return message.content.trim();
+  const attachmentSummary = messageAttachmentSummary(message);
+  if (typeof message.content === "string") {
+    return [message.content.trim(), attachmentSummary].filter(Boolean).join("\n\n");
+  }
+
   const parts = Array.isArray(message.parts) ? message.parts : [];
-  return parts
+  const text = parts
     .flatMap((part) => {
       if (!isRecord(part)) return [];
       return part.type === "text" && typeof part.text === "string" ? [part.text] : [];
     })
     .join("\n")
     .trim();
+
+  return [text, attachmentSummary].filter(Boolean).join("\n\n");
+}
+
+function messageAttachmentSummary(message: Record<string, unknown>): string {
+  const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+  const parts = Array.isArray(message.parts) ? message.parts : [];
+  const labels = new Set<string>();
+
+  for (const attachment of attachments) {
+    const label = attachmentLabel(attachment);
+    if (label) labels.add(label);
+  }
+
+  for (const part of parts) {
+    if (!isRecord(part)) continue;
+    if (part.type === "file") {
+      const filename = typeof part.filename === "string" ? part.filename : "file attachment";
+      const mimeType = typeof part.mimeType === "string" ? part.mimeType : undefined;
+      labels.add(mimeType ? `${filename} (${mimeType})` : filename);
+    }
+    if (part.type === "image") {
+      const filename = typeof part.filename === "string" ? part.filename : "image attachment";
+      labels.add(filename);
+    }
+  }
+
+  if (labels.size === 0) return "";
+  return `Attached context:\n${Array.from(labels)
+    .map((label) => `- ${label}`)
+    .join("\n")}`;
+}
+
+function visibleAssistantText(text: string): string {
+  const value = text.trim();
+  return value.toLowerCase().startsWith("missing fields:") ? "" : value;
+}
+
+function attachmentLabel(value: unknown): string | null {
+  if (!isRecord(value) || typeof value.name !== "string") return null;
+  return typeof value.contentType === "string"
+    ? `${value.name} (${value.contentType})`
+    : value.name;
 }
 
 function endpointForKind(kind: ClariseArtifactDraft["kind"]): string {

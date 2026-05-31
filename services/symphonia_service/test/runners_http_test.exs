@@ -3,7 +3,6 @@ defmodule SymphoniaService.RunnersHTTPTest do
 
   alias SymphoniaService.Access.AuditLog
   alias SymphoniaService.CodingAssistant.RunStore
-  alias SymphoniaService.Runners.Registry
   alias SymphoniaService.{HTTPServer, RepositoryRegistry, TaskStore, Workspace}
 
   setup do
@@ -51,28 +50,44 @@ defmodule SymphoniaService.RunnersHTTPTest do
       http_json(
         port,
         "POST",
-        "/api/runners/register",
-        registration_body(),
+        "/api/runners/pairing-tokens",
+        pairing_body(),
         [{"x-symphonia-role", "viewer"}]
       )
 
     assert denied.status == 403
-    refute File.exists?(Registry.path(registry_path))
+
+    pairing =
+      http_json(
+        port,
+        "POST",
+        "/api/runners/pairing-tokens",
+        pairing_body(),
+        [{"x-symphonia-role", "owner"}]
+      )
+
+    assert pairing.status == 201
+    pairing_token = pairing.body["pairingToken"]
+    assert pairing_token =~ "sym_pair_"
 
     registered =
       http_json(
         port,
         "POST",
         "/api/runners/register",
-        registration_body(),
-        [{"x-symphonia-role", "owner"}]
+        registration_body(pairing_token),
+        []
       )
 
     assert registered.status == 201
     runner = registered.body["runner"]
+    runner_token = registered.body["runnerToken"]
     assert runner["mode"] == "remote_runner"
+    assert runner["trustState"] == "pending"
+    assert runner_token =~ "sym_runner_"
     refute JSON.encode!(runner) =~ "local-dev-token"
-    refute JSON.encode!(runner) =~ "token"
+    refute JSON.encode!(runner) =~ runner_token
+    refute JSON.encode!(runner) =~ pairing_token
 
     bad_heartbeat =
       http_json(
@@ -90,7 +105,11 @@ defmodule SymphoniaService.RunnersHTTPTest do
         port,
         "POST",
         "/api/runners/#{runner["id"]}/heartbeat",
-        ~s({"token":"local-dev-token","currentRuns":0,"capabilities":{"codexAppServer":true,"validation":true}}),
+        JSON.encode!(%{
+          "token" => runner_token,
+          "currentRuns" => 0,
+          "capabilities" => %{"codexAppServer" => true, "validation" => true}
+        }),
         []
       )
 
@@ -109,12 +128,24 @@ defmodule SymphoniaService.RunnersHTTPTest do
     assert bad_claim.status == 403
     assert bad_claim.body["reasonCode"] == "invalid_runner_token"
 
+    pairing_claim =
+      http_json(
+        port,
+        "POST",
+        "/api/runners/#{runner["id"]}/assignments/claim",
+        JSON.encode!(%{"token" => pairing_token}),
+        []
+      )
+
+    assert pairing_claim.status == 403
+    assert pairing_claim.body["reasonCode"] == "invalid_runner_token"
+
     empty_claim =
       http_json(
         port,
         "POST",
         "/api/runners/#{runner["id"]}/assignments/claim",
-        ~s({"token":"local-dev-token"}),
+        JSON.encode!(%{"token" => runner_token}),
         []
       )
 
@@ -149,9 +180,10 @@ defmodule SymphoniaService.RunnersHTTPTest do
       |> AuditLog.list(%{"key" => "GLOBAL"}, limit: :all)
       |> Enum.map(& &1["action"])
 
-    assert "runner.register" in actions
-    assert "runner.disable" in actions
-    assert "runner.enable" in actions
+    assert "runner.pairing_token_created" in actions
+    assert "runner.paired" in actions
+    assert "runner.disabled" in actions
+    assert "runner.enabled" in actions
   end
 
   test "manual remote runner selection is rejected before a run starts", %{
@@ -159,14 +191,7 @@ defmodule SymphoniaService.RunnersHTTPTest do
     registry_path: registry_path,
     task: task
   } do
-    registered =
-      http_json(
-        port,
-        "POST",
-        "/api/runners/register",
-        registration_body(%{"localGitWorktree" => true}),
-        [{"x-symphonia-role", "owner"}]
-      )
+    registered = register_runner!(port, %{"localGitWorktree" => true})
 
     runner_id = registered.body["runner"]["id"]
 
@@ -180,10 +205,10 @@ defmodule SymphoniaService.RunnersHTTPTest do
       )
 
     assert rejected.status == 403
-    assert rejected.body["reasonCode"] == "remote_execution_disabled"
+    assert rejected.body["reasonCode"] == "runner_not_trusted"
     assert RunStore.list() == []
 
-    assert [%{"action" => "runner.rejected_for_run"} | _rest] =
+    assert [%{"action" => "runner.selection_denied"} | _rest] =
              AuditLog.list(registry_path, %{"key" => "SYM"}, limit: :all)
   end
 
@@ -235,10 +260,43 @@ defmodule SymphoniaService.RunnersHTTPTest do
     assert "sandbox.policy_enabled" in actions
   end
 
-  defp registration_body(extra_capabilities \\ %{}) do
+  defp register_runner!(port, extra_capabilities) do
+    pairing =
+      http_json(
+        port,
+        "POST",
+        "/api/runners/pairing-tokens",
+        pairing_body(),
+        [{"x-symphonia-role", "owner"}]
+      )
+
+    assert pairing.status == 201
+
+    registered =
+      http_json(
+        port,
+        "POST",
+        "/api/runners/register",
+        registration_body(pairing.body["pairingToken"], extra_capabilities),
+        []
+      )
+
+    assert registered.status == 201
+    registered
+  end
+
+  defp pairing_body do
     JSON.encode!(%{
       "name" => "runner-mac-mini",
-      "registrationToken" => "local-dev-token",
+      "expiresInMinutes" => 15,
+      "capabilityHint" => %{"codexAppServer" => true, "validation" => true}
+    })
+  end
+
+  defp registration_body(pairing_token, extra_capabilities \\ %{}) do
+    JSON.encode!(%{
+      "name" => "runner-mac-mini",
+      "pairingToken" => pairing_token,
       "capabilities" =>
         Map.merge(
           %{

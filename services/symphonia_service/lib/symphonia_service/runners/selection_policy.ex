@@ -25,7 +25,7 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
       registry_path,
       repository,
       actor,
-      "runner.selected_for_run",
+      "runner.selection_allowed",
       runner,
       "selected"
     )
@@ -36,13 +36,15 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
   defp select_remote_runner(registry_path, repository, actor, runner_id, opts) do
     with {:ok, private_runner} <- Registry.get(registry_path, runner_id),
          public_runner <- Registry.public(private_runner),
-         :ok <- require_online(public_runner),
          :ok <- require_trusted(private_runner),
+         :ok <- require_token_active(private_runner),
+         :ok <- require_online(public_runner),
          :ok <- require_capabilities(public_runner, opts),
          :ok <- require_capacity(public_runner),
          :ok <- require_permission(actor, repository),
          :ok <- require_repository_policy(repository),
          :ok <- require_execution_flag(opts),
+         :ok <- require_repository_runner(repository, runner_id),
          :ok <- require_harness_not_paused(registry_path, opts) do
       runner = metadata(public_runner)
 
@@ -50,7 +52,7 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
         registry_path,
         repository,
         actor,
-        "runner.selected_for_run",
+        "runner.selection_allowed",
         runner,
         "selected"
       )
@@ -65,7 +67,7 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
           registry_path,
           repository,
           actor,
-          "runner.rejected_for_run",
+          "runner.selection_denied",
           runner,
           reason
         )
@@ -80,8 +82,24 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
   defp require_online(%{"status" => "offline"}), do: {:error, "runner_offline"}
   defp require_online(_runner), do: {:error, "runner_unavailable"}
 
-  defp require_trusted(%{"trusted" => false}), do: {:error, "runner_untrusted"}
-  defp require_trusted(_runner), do: :ok
+  defp require_trusted(runner) do
+    case Registry.trust_state(runner) do
+      "trusted" -> :ok
+      "pending" -> {:error, "runner_not_trusted"}
+      "disabled" -> {:error, "runner_disabled"}
+      "revoked" -> {:error, "runner_revoked"}
+      _state -> {:error, "runner_not_trusted"}
+    end
+  end
+
+  defp require_token_active(runner) do
+    case Registry.token_state(runner) do
+      "active" -> :ok
+      "revoked" -> {:error, "runner_token_revoked"}
+      "rotated" -> {:error, "runner_token_rotated"}
+      _state -> {:error, "runner_token_invalid"}
+    end
+  end
 
   defp require_capabilities(%{"capabilities" => capabilities}, opts) do
     workspace_provider = Keyword.get(opts, :workspace_provider, "local_git_worktree")
@@ -126,6 +144,14 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
     end
   end
 
+  defp require_repository_runner(repository, runner_id) do
+    if RepositoryPolicy.runner_allowed?(repository, runner_id) do
+      :ok
+    else
+      {:error, "runner_not_allowed_for_repository"}
+    end
+  end
+
   defp require_execution_flag(opts) do
     if Keyword.get(opts, :allow_remote_execution, false) == true do
       :ok
@@ -147,7 +173,10 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
     %{
       "id" => public_runner["id"],
       "mode" => public_runner["mode"],
-      "name" => public_runner["name"]
+      "name" => public_runner["name"],
+      "trustState" => public_runner["trustState"],
+      "healthState" => public_runner["healthState"],
+      "tokenState" => public_runner["tokenState"]
     }
   end
 
@@ -179,7 +208,14 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
   defp rejection_message("runner_disabled"), do: "Requested runner is disabled."
   defp rejection_message("runner_stale"), do: "Requested runner heartbeat is stale."
   defp rejection_message("runner_offline"), do: "Requested runner is offline."
-  defp rejection_message("runner_untrusted"), do: "Requested runner is not trusted."
+  defp rejection_message("runner_not_trusted"), do: "Requested runner is not trusted."
+  defp rejection_message("runner_revoked"), do: "Requested runner is revoked."
+  defp rejection_message("runner_token_rotated"), do: "Requested runner token has been rotated."
+  defp rejection_message("runner_token_revoked"), do: "Requested runner token is revoked."
+  defp rejection_message("runner_token_invalid"), do: "Requested runner token is invalid."
+  defp rejection_message("runner_not_allowed_for_repository"),
+    do: "Requested runner is not allowed for this repository."
+
   defp rejection_message("missing_codex_capability"), do: "Requested runner cannot run Codex."
   defp rejection_message("harness_paused"), do: "Remote runner execution is paused."
 
@@ -200,6 +236,9 @@ defmodule SymphoniaService.Runners.SelectionPolicy do
       "metadata" => %{
         "runnerId" => runner["id"],
         "runnerMode" => runner["mode"],
+        "trustState" => runner["trustState"],
+        "healthState" => runner["healthState"],
+        "tokenState" => runner["tokenState"],
         "capabilitySummary" => capability_summary(registry_path, runner["id"]),
         "reasonCode" => reason_code
       }

@@ -109,25 +109,31 @@ defmodule SymphoniaService.RemoteRunnerExecutionTest do
         "body" => "Create a small remote runner file."
       })
 
-    {:ok, runner} =
-      Registry.register(
+    {runner, runner_token} =
+      FakeRunner.register!(
         registry_path,
         %{"role" => "owner", "name" => "Owner"},
-        FakeRunner.registration_attrs(%{
+        %{
           "capabilities" => %{
             "codexAppServer" => true,
             "localGitWorktree" => false,
             "experimentalSandbox" => true,
             "validation" => true
           }
-        })
+        }
       )
+
+    repository =
+      RepositoryRegistry.update(registry_path, "SYM", fn repo ->
+        Map.put(repo, "allowedRunnerIds", [runner["id"]])
+      end)
 
     %{
       registry_path: registry_path,
       remote_path: remote_path,
       repository: repository,
       runner: Registry.public(runner),
+      runner_token: runner_token,
       task: task
     }
   end
@@ -137,6 +143,7 @@ defmodule SymphoniaService.RemoteRunnerExecutionTest do
     remote_path: remote_path,
     repository: repository,
     runner: runner,
+    runner_token: runner_token,
     task: task
   } do
     actor = %{"id" => "maintainer", "name" => "Maintainer", "role" => "maintainer"}
@@ -161,7 +168,7 @@ defmodule SymphoniaService.RemoteRunnerExecutionTest do
     refute JSON.encode!(AssignmentStore.runner_payload(assignment)) =~ repository["path"]
     refute JSON.encode!(AssignmentStore.runner_payload(assignment)) =~ "installation-token"
 
-    assert {:ok, claimed} = Assignments.claim(registry_path, runner["id"], "fake-runner-token")
+    assert {:ok, claimed} = Assignments.claim(registry_path, runner["id"], runner_token)
     assert claimed["id"] == assignment_id
     assert claimed["state"] == "claimed"
 
@@ -170,7 +177,7 @@ defmodule SymphoniaService.RemoteRunnerExecutionTest do
                registry_path,
                runner["id"],
                assignment_id,
-               "fake-runner-token",
+               runner_token,
                %{"step" => "running_provider", "message" => "Running on runner"}
              )
 
@@ -183,7 +190,7 @@ defmodule SymphoniaService.RemoteRunnerExecutionTest do
                registry_path,
                runner["id"],
                assignment_id,
-               "fake-runner-token",
+               runner_token,
                result_payload
              )
 
@@ -194,7 +201,7 @@ defmodule SymphoniaService.RemoteRunnerExecutionTest do
                registry_path,
                runner["id"],
                assignment_id,
-               "fake-runner-token",
+               runner_token,
                result_payload
              )
 
@@ -226,6 +233,7 @@ defmodule SymphoniaService.RemoteRunnerExecutionTest do
     registry_path: registry_path,
     repository: repository,
     runner: runner,
+    runner_token: runner_token,
     task: task
   } do
     actor = %{"id" => "maintainer", "name" => "Maintainer", "role" => "maintainer"}
@@ -257,7 +265,7 @@ defmodule SymphoniaService.RemoteRunnerExecutionTest do
                registry_path,
                runner["id"],
                assignment["id"],
-               "fake-runner-token",
+               runner_token,
                patch_result(assignment)
              )
   end

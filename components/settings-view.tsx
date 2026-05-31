@@ -43,6 +43,7 @@ import {
   runnerCapacityLabel,
   runnerStatusLabel,
   runnerStatusTone,
+  runnerTrustDetail,
   type RunnerStatusRow,
 } from "@/lib/runner-model";
 import {
@@ -463,6 +464,10 @@ async function setAutomationEnabled(
 
 interface RemoteExecutionPolicy {
   remoteExecutionAllowed: boolean;
+  allowedRunnerIds?: string[];
+  allowedSandboxProviders?: string[];
+  requireTrustedRunner?: boolean;
+  secretScopesAllowed?: string[];
 }
 
 interface SandboxPolicy {
@@ -470,6 +475,29 @@ interface SandboxPolicy {
   sandboxProvider?: string | null;
   sandboxProviderLabel?: string;
 }
+
+interface SecretReference {
+  id: string;
+  label: string;
+  scope: string;
+  source: "environment" | string;
+  envName: string;
+  configured: boolean;
+  lastCheckedAt?: string;
+}
+
+interface SecretReferencesPayload {
+  secretReferences: SecretReference[];
+}
+
+interface PairingTokenPayload {
+  pairingToken: string;
+  expiresAt: string;
+  runnerName: string;
+  message: string;
+}
+
+type RunnerAction = "approve" | "enable" | "disable" | "revoke" | "rotate-token";
 
 async function fetchRemoteExecutionPolicy(repoKey: string): Promise<RemoteExecutionPolicy> {
   const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/remote-execution`, {
@@ -525,6 +553,40 @@ async function setSandboxPolicy(repoKey: string, policy: SandboxPolicy): Promise
     throw new Error(payload.error ?? "Could not update sandbox execution policy");
   }
   return payload.policy;
+}
+
+async function fetchSecretReferences(repoKey: string): Promise<SecretReference[]> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/secret-references`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as SecretReferencesPayload & { error?: string };
+  if (!res.ok) {
+    throw new Error(payload.error ?? "Could not load secret references");
+  }
+  return payload.secretReferences ?? [];
+}
+
+async function createPairingToken(): Promise<PairingTokenPayload> {
+  const res = await fetch("/api/runners/pairing-tokens", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "Remote runner",
+      expiresInMinutes: 15,
+      capabilityHint: { codexAppServer: true, validation: true },
+    }),
+  });
+  const payload = (await res.json()) as Partial<PairingTokenPayload> & { error?: string };
+  if (!res.ok || !payload.pairingToken || !payload.expiresAt || !payload.runnerName) {
+    throw new Error(payload.error ?? "Could not create pairing token");
+  }
+  return {
+    pairingToken: payload.pairingToken,
+    expiresAt: payload.expiresAt,
+    runnerName: payload.runnerName,
+    message: payload.message ?? "Copy this token now. It will not be shown again.",
+  };
 }
 
 interface HarnessStatus {
@@ -598,17 +660,21 @@ async function postHarnessAction(
 
 async function postRunnerAction(
   runnerId: string,
-  action: "enable" | "disable",
-): Promise<RunnerStatusRow> {
+  action: RunnerAction,
+): Promise<{ runner: RunnerStatusRow; runnerToken?: string }> {
   const res = await fetch(`/api/runners/${encodeURIComponent(runnerId)}/${action}`, {
     method: "POST",
     cache: "no-store",
   });
-  const payload = (await res.json()) as { runner?: RunnerStatusRow; error?: string };
+  const payload = (await res.json()) as {
+    runner?: RunnerStatusRow;
+    runnerToken?: string;
+    error?: string;
+  };
   if (!res.ok || !payload.runner) {
     throw new Error(payload.error ?? "Could not update runner");
   }
-  return payload.runner;
+  return { runner: payload.runner, runnerToken: payload.runnerToken };
 }
 
 function AccessPanel({ access }: { access: RepositoryAccess | null }) {
@@ -787,17 +853,25 @@ function HarnessPanel({
   const [pendingRemotePolicy, setPendingRemotePolicy] = useState(false);
   const [sandboxPolicy, setSandboxPolicyState] = useState<SandboxPolicy | null>(null);
   const [pendingSandboxPolicy, setPendingSandboxPolicy] = useState(false);
+  const [secretReferences, setSecretReferences] = useState<SecretReference[]>([]);
+  const [oneTimeToken, setOneTimeToken] = useState<PairingTokenPayload | { runnerToken: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     const refresh = () => {
-      Promise.all([fetchHarnessStatus(), fetchRemoteExecutionPolicy(repoKey), fetchSandboxPolicy(repoKey)])
-        .then(([nextStatus, nextPolicy, nextSandboxPolicy]) => {
+      Promise.all([
+        fetchHarnessStatus(),
+        fetchRemoteExecutionPolicy(repoKey),
+        fetchSandboxPolicy(repoKey),
+        fetchSecretReferences(repoKey),
+      ])
+        .then(([nextStatus, nextPolicy, nextSandboxPolicy, nextSecretReferences]) => {
           if (cancelled) return;
           setStatus(nextStatus);
           setRemotePolicy(nextPolicy);
           setSandboxPolicyState(nextSandboxPolicy);
+          setSecretReferences(nextSecretReferences);
           setError(null);
         })
         .catch((err: unknown) => {
@@ -826,15 +900,30 @@ function HarnessPanel({
     }
   };
 
-  const runRunnerAction = async (runner: RunnerStatusRow, action: "enable" | "disable") => {
+  const runRunnerAction = async (runner: RunnerStatusRow, action: RunnerAction) => {
     const key = `${runner.id}:${action}`;
     setPendingRunnerAction(key);
     setError(null);
     try {
-      await postRunnerAction(runner.id, action);
+      const result = await postRunnerAction(runner.id, action);
+      if (result.runnerToken) {
+        setOneTimeToken({ runnerToken: result.runnerToken });
+      }
       setStatus(await fetchHarnessStatus());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update runner");
+    } finally {
+      setPendingRunnerAction(null);
+    }
+  };
+
+  const pairRunner = async () => {
+    setPendingRunnerAction("pair");
+    setError(null);
+    try {
+      setOneTimeToken(await createPairingToken());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create pairing token");
     } finally {
       setPendingRunnerAction(null);
     }
@@ -977,6 +1066,9 @@ function HarnessPanel({
         onToggleSandboxPolicy={toggleSandboxPolicy}
         pendingAction={pendingRunnerAction}
         onAction={runRunnerAction}
+        onPairRunner={pairRunner}
+        oneTimeToken={oneTimeToken}
+        secretReferences={secretReferences}
       />
 
       <div className="border-t px-3 py-3">
@@ -1068,6 +1160,9 @@ function RunnerCapacitySection({
   onToggleSandboxPolicy,
   pendingAction,
   onAction,
+  onPairRunner,
+  oneTimeToken,
+  secretReferences,
 }: {
   runners?: HarnessStatus["runners"];
   access: RepositoryAccess | null;
@@ -1078,7 +1173,10 @@ function RunnerCapacitySection({
   onToggleRemotePolicy: () => void;
   onToggleSandboxPolicy: () => void;
   pendingAction: string | null;
-  onAction: (runner: RunnerStatusRow, action: "enable" | "disable") => void;
+  onAction: (runner: RunnerStatusRow, action: RunnerAction) => void;
+  onPairRunner: () => void;
+  oneTimeToken: PairingTokenPayload | { runnerToken: string } | null;
+  secretReferences: SecretReference[];
 }) {
   const localService = runners?.localService;
   const remote = runners?.remote ?? [];
@@ -1132,6 +1230,37 @@ function RunnerCapacitySection({
             No remote runners connected.
           </div>
         )}
+
+        <div className="rounded-[8px] border bg-background/60 p-2.5 text-xs">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 font-medium">
+                <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+                <span>Runner trust</span>
+              </div>
+              <div className="mt-1 text-muted-foreground">
+                Pairing tokens are shown once. New runners start pending approval.
+              </div>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={pendingAction === "pair" || !canAccess(access, "runner.pair")}
+              title={disabledReason(access, "runner.pair")}
+              onClick={onPairRunner}
+            >
+              <KeyRound className="h-3 w-3" />
+              {pendingAction === "pair" ? "Creating" : "Pair runner"}
+            </button>
+          </div>
+          {oneTimeToken && (
+            <div className="mt-2 rounded-[7px] border bg-muted/40 p-2 font-mono text-[11px] text-foreground">
+              {"pairingToken" in oneTimeToken
+                ? oneTimeToken.pairingToken
+                : oneTimeToken.runnerToken}
+            </div>
+          )}
+        </div>
 
         <div className="rounded-[8px] border bg-background/60 p-2.5 text-xs">
           <div className="flex items-start justify-between gap-3">
@@ -1191,6 +1320,38 @@ function RunnerCapacitySection({
             </button>
           </div>
         </div>
+
+        <div className="rounded-[8px] border bg-background/60 p-2.5 text-xs">
+          <div className="flex items-center gap-1.5 font-medium">
+            <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>Secret references</span>
+          </div>
+          <div className="mt-1 text-muted-foreground">
+            References are environment-backed metadata. Values are never shown.
+          </div>
+          <div className="mt-2 space-y-1.5">
+            {secretReferences.length > 0 ? (
+              secretReferences.map((reference) => (
+                <div key={reference.id} className="flex items-center justify-between gap-2 rounded-[7px] border px-2 py-1.5">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{reference.label}</div>
+                    <div className="truncate text-muted-foreground">
+                      Environment: {reference.envName} · {reference.scope}
+                    </div>
+                  </div>
+                  <StatusPill
+                    tone={reference.configured ? "ready" : "warning"}
+                    label={reference.configured ? "Configured" : "Missing"}
+                  />
+                </div>
+              ))
+            ) : (
+              <div className="rounded-[7px] border px-2 py-1.5 text-muted-foreground">
+                No secret references configured.
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1207,13 +1368,16 @@ function RunnerRow({
   access: RepositoryAccess | null;
   remoteAllowed?: boolean;
   pendingAction: string | null;
-  onAction: (runner: RunnerStatusRow, action: "enable" | "disable") => void;
+  onAction: (runner: RunnerStatusRow, action: RunnerAction) => void;
 }) {
   const isRemote = runner.mode === "remote_runner";
   const action = runner.status === "disabled" ? "enable" : "disable";
   const permission = action === "enable" ? "runner.enable" : "runner.disable";
   const blockedReason = isRemote ? disabledReason(access, permission) : undefined;
   const pending = pendingAction === `${runner.id}:${action}`;
+  const approveBlockedReason = disabledReason(access, "runner.approve");
+  const rotateBlockedReason = disabledReason(access, "runner.rotate_token");
+  const revokeBlockedReason = disabledReason(access, "runner.revoke");
 
   return (
     <div className="rounded-[8px] border bg-background/60 p-2.5 text-xs">
@@ -1224,6 +1388,7 @@ function RunnerRow({
             <span>{runner.name}</span>
           </div>
           <div className="mt-1 text-muted-foreground">{runnerCapabilitySummary(runner)}</div>
+          <div className="mt-1 text-muted-foreground">{runnerTrustDetail(runner)}</div>
           {isRemote && (
             <div className="mt-1 text-muted-foreground">
               {remoteAllowed
@@ -1240,16 +1405,56 @@ function RunnerRow({
           Capacity {runnerCapacityLabel(runner)}
         </span>
         {isRemote && (
-          <button
-            type="button"
-            className="inline-flex h-6 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={pending || Boolean(blockedReason)}
-            title={blockedReason}
-            onClick={() => onAction(runner, action)}
-          >
-            {action === "enable" ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
-            {pending ? "Updating" : action === "enable" ? "Enable" : "Disable"}
-          </button>
+          <>
+            {runner.trustState === "pending" && (
+              <button
+                type="button"
+                className="inline-flex h-6 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={pendingAction === `${runner.id}:approve` || Boolean(approveBlockedReason)}
+                title={approveBlockedReason}
+                onClick={() => onAction(runner, "approve")}
+              >
+                <Check className="h-3 w-3" />
+                {pendingAction === `${runner.id}:approve` ? "Approving" : "Approve"}
+              </button>
+            )}
+            {runner.trustState !== "revoked" && (
+              <button
+                type="button"
+                className="inline-flex h-6 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={pending || Boolean(blockedReason)}
+                title={blockedReason}
+                onClick={() => onAction(runner, action)}
+              >
+                {action === "enable" ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+                {pending ? "Updating" : action === "enable" ? "Enable" : "Disable"}
+              </button>
+            )}
+            {runner.trustState !== "revoked" && (
+              <button
+                type="button"
+                className="inline-flex h-6 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={pendingAction === `${runner.id}:rotate-token` || Boolean(rotateBlockedReason)}
+                title={rotateBlockedReason}
+                onClick={() => onAction(runner, "rotate-token")}
+              >
+                <RefreshCw className="h-3 w-3" />
+                {pendingAction === `${runner.id}:rotate-token` ? "Rotating" : "Rotate token"}
+              </button>
+            )}
+            {runner.trustState !== "revoked" && (
+              <button
+                type="button"
+                className="inline-flex h-6 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={pendingAction === `${runner.id}:revoke` || Boolean(revokeBlockedReason)}
+                title={revokeBlockedReason}
+                onClick={() => onAction(runner, "revoke")}
+              >
+                <Pause className="h-3 w-3" />
+                {pendingAction === `${runner.id}:revoke` ? "Revoking" : "Revoke"}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

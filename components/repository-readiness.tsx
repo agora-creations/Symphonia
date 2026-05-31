@@ -41,6 +41,7 @@ const CATEGORY_LABELS: Record<RepositoryReadinessCategory, string> = {
   provider: "Codex",
   runner: "Runner capacity",
   sandbox: "Sandbox",
+  secrets: "Secrets",
   validation: "Validation",
   github: "GitHub",
   review: "Review branches",

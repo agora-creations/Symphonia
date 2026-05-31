@@ -22,14 +22,17 @@ defmodule SymphoniaService.HTTPServer do
   alias SymphoniaService.Readiness.{RepositoryReadiness, RepositoryScanner, SetupActions}
 
   alias SymphoniaService.Runners.{
+    AssignmentStore,
     Assignments,
     Capabilities,
+    Pairing,
     Registry,
     RepositoryPolicy,
     SelectionPolicy
   }
 
   alias SymphoniaService.Sandbox.Policy, as: SandboxPolicy
+  alias SymphoniaService.Secrets.ReferenceStore, as: SecretReferences
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
@@ -263,6 +266,17 @@ defmodule SymphoniaService.HTTPServer do
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "policy" => SandboxPolicy.public(repository)}}
 
+      ["api", "repositories", repo, "secret-references"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded_read(registry_path, actor, repository, "secret_reference.view", fn ->
+          {200,
+           %{
+             "repo" => repository["key"],
+             "secretReferences" => SecretReferences.list(registry_path, repository)
+           }}
+        end)
+
       ["api", "harness", "daemon"] ->
         Daemon.ensure_started(registry_path)
         {200, %{"daemon" => Daemon.status()}}
@@ -414,6 +428,28 @@ defmodule SymphoniaService.HTTPServer do
           end
         )
 
+      ["api", "repositories", repo, "secret-references", secret_ref_id] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "secret_reference.delete",
+          %{"type" => "secret_reference", "id" => secret_ref_id},
+          fn ->
+            case SecretReferences.delete(registry_path, repository, secret_ref_id) do
+              {:ok, secret_reference} ->
+                {200, %{"repo" => repository["key"], "secretReference" => secret_reference}}
+
+              {:error, :not_found} ->
+                {404, %{"error" => "Secret reference not found.", "reasonCode" => "not_found"}}
+            end
+          end,
+          %{},
+          "secret_reference.deleted"
+        )
+
       _ ->
         {404, %{"error" => "Not found"}}
     end
@@ -423,13 +459,125 @@ defmodule SymphoniaService.HTTPServer do
 
   defp route(%{method: "POST", path: path, body: body, headers: headers}, registry_path, actor) do
     case path_parts(path) do
-      ["api", "runners", "register"] ->
-        guarded_runner_action(registry_path, actor, "runner.register", runner_target(), fn ->
-          {:ok, runner} = Registry.register(registry_path, actor, decode_json(body))
-          public = Registry.public(runner)
+      ["api", "runners", "pairing-tokens"] ->
+        guarded_runner_action(registry_path, actor, "runner.pair", runner_target(), fn ->
+          {:ok, pairing, token} = Pairing.create(registry_path, actor, decode_json(body))
 
-          {201, %{"runner" => public}, runner_target(public["id"]), runner_metadata(public)}
-        end)
+          {201,
+           %{
+             "pairingToken" => token,
+             "expiresAt" => pairing["expiresAt"],
+             "runnerName" => pairing["name"],
+             "message" => "Copy this token now. It will not be shown again."
+           }, runner_target(pairing["id"]),
+           %{"reasonCode" => "pairing_token_created"}}
+        end, "runner.pairing_token_created")
+
+      ["api", "runners", "register"] ->
+        case Registry.register(registry_path, actor, decode_json(body)) do
+          {:ok, runner, runner_token} ->
+            public = Registry.public(runner)
+
+            AuditLog.record(registry_path, global_repository(), %{
+              "actor" => actor,
+              "action" => "runner.paired",
+              "target" => runner_target(public["id"]),
+              "result" => "completed",
+              "metadata" => runner_metadata(public)
+            })
+
+            {201, %{"runner" => public, "runnerToken" => runner_token}}
+
+          {:error, reason} ->
+            {403,
+             %{
+               "error" => pairing_error_message(reason),
+               "reasonCode" => to_string(reason)
+             }}
+        end
+
+      ["api", "runners", runner_id, "approve"] ->
+        guarded_runner_action(
+          registry_path,
+          actor,
+          "runner.approve",
+          runner_target(runner_id),
+          fn ->
+            case Registry.approve(registry_path, runner_id) do
+              {:ok, runner, _meta} ->
+                public = Registry.public(runner)
+                {200, %{"runner" => public}, runner_target(public["id"]), runner_metadata(public)}
+
+              {:error, reason} ->
+                runner_lifecycle_error(reason, runner_id)
+            end
+          end,
+          "runner.trust_approved"
+        )
+
+      ["api", "runners", runner_id, "revoke"] ->
+        guarded_runner_action(
+          registry_path,
+          actor,
+          "runner.revoke",
+          runner_target(runner_id),
+          fn ->
+            case Registry.revoke(registry_path, runner_id) do
+              {:ok, runner, _meta} ->
+                cancel_assignments_for_runner(registry_path, runner_id)
+                public = Registry.public(runner)
+                {200, %{"runner" => public}, runner_target(public["id"]), runner_metadata(public)}
+
+              {:error, reason} ->
+                runner_lifecycle_error(reason, runner_id)
+            end
+          end,
+          "runner.revoked"
+        )
+
+      ["api", "runners", runner_id, "rotate-token"] ->
+        guarded_runner_action(
+          registry_path,
+          actor,
+          "runner.rotate_token",
+          runner_target(runner_id),
+          fn ->
+            case Registry.rotate_token(registry_path, runner_id) do
+              {:ok, runner, token} ->
+                public = Registry.public(runner)
+
+                {200, %{"runner" => public, "runnerToken" => token}, runner_target(public["id"]),
+                 runner_metadata(public)}
+
+              {:error, reason} ->
+                runner_lifecycle_error(reason, runner_id)
+            end
+          end,
+          "runner.token_rotated"
+        )
+
+      ["api", "repositories", repo, "secret-references"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "secret_reference.create",
+          %{"type" => "secret_reference"},
+          fn ->
+            {:ok, secret_reference} =
+              SecretReferences.create(registry_path, repository, decode_json(body))
+
+            {201,
+             %{
+               "repo" => repository["key"],
+               "secretReference" => secret_reference
+             }}
+          end,
+          secret_reference_metadata(decode_json(body)),
+          "secret_reference.created"
+        )
 
       ["api", "runners", runner_id, "heartbeat"] ->
         payload = decode_json(body)
@@ -452,6 +600,15 @@ defmodule SymphoniaService.HTTPServer do
 
           {:error, :invalid_token} ->
             {403, %{"error" => "Invalid runner token.", "reasonCode" => "invalid_runner_token"}}
+
+          {:error, :runner_revoked} ->
+            {403, %{"error" => "Runner is revoked.", "reasonCode" => "runner_revoked"}}
+
+          {:error, :runner_token_rotated} ->
+            {403, %{"error" => "Runner token has been rotated.", "reasonCode" => "runner_token_rotated"}}
+
+          {:error, :runner_token_revoked} ->
+            {403, %{"error" => "Runner token is revoked.", "reasonCode" => "runner_token_revoked"}}
 
           {:error, :not_found} ->
             {404, %{"error" => "Runner not found.", "reasonCode" => "runner_not_found"}}
@@ -522,20 +679,11 @@ defmodule SymphoniaService.HTTPServer do
                 public = Registry.public(runner)
                 {200, %{"runner" => public}, runner_target(public["id"]), runner_metadata(public)}
 
-              {:error, :local_service_immutable} ->
-                {400,
-                 %{
-                   "error" => "Local service runner cannot be disabled in V1.",
-                   "reasonCode" => "local_service_immutable"
-                 }, runner_target(runner_id),
-                 %{"runnerId" => runner_id, "runnerMode" => "local_service"}}
-
-              {:error, :not_found} ->
-                {404, %{"error" => "Runner not found.", "reasonCode" => "runner_not_found"},
-                 runner_target(runner_id),
-                 %{"runnerId" => runner_id, "runnerMode" => "remote_runner"}}
+              {:error, reason} ->
+                runner_lifecycle_error(reason, runner_id)
             end
-          end
+          end,
+          "runner.disabled"
         )
 
       ["api", "runners", runner_id, "enable"] ->
@@ -550,20 +698,11 @@ defmodule SymphoniaService.HTTPServer do
                 public = Registry.public(runner)
                 {200, %{"runner" => public}, runner_target(public["id"]), runner_metadata(public)}
 
-              {:error, :local_service_immutable} ->
-                {400,
-                 %{
-                   "error" => "Local service runner cannot be enabled in V1.",
-                   "reasonCode" => "local_service_immutable"
-                 }, runner_target(runner_id),
-                 %{"runnerId" => runner_id, "runnerMode" => "local_service"}}
-
-              {:error, :not_found} ->
-                {404, %{"error" => "Runner not found.", "reasonCode" => "runner_not_found"},
-                 runner_target(runner_id),
-                 %{"runnerId" => runner_id, "runnerMode" => "remote_runner"}}
+              {:error, reason} ->
+                runner_lifecycle_error(reason, runner_id)
             end
-          end
+          end,
+          "runner.enabled"
         )
 
       ["api", "github", "connect", "start"] ->
@@ -859,6 +998,22 @@ defmodule SymphoniaService.HTTPServer do
           {200, %{"repo" => repository["key"], "automation" => Automation.status(repository)}}
         end)
 
+      ["api", "repositories", repo, "remote-execution"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        payload = decode_json(body)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "repository.configure",
+          repository_target(),
+          fn ->
+            repository = RepositoryPolicy.update_policy(registry_path, repo, payload)
+            {200, %{"repo" => repository["key"], "policy" => RepositoryPolicy.public(repository)}}
+          end
+        )
+
       ["api", "repositories", repo, "remote-execution", "enable"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
 
@@ -903,7 +1058,8 @@ defmodule SymphoniaService.HTTPServer do
           "sandbox.configure",
           repository_target(),
           fn ->
-            repository = SandboxPolicy.set(registry_path, repo, payload)
+            SandboxPolicy.set(registry_path, repo, payload)
+            repository = RepositoryPolicy.update_policy(registry_path, repo, payload)
 
             action =
               if allowed?, do: "sandbox.policy_enabled", else: "sandbox.policy_disabled"
@@ -1244,7 +1400,7 @@ defmodule SymphoniaService.HTTPServer do
     end
   end
 
-  defp guarded_runner_action(registry_path, actor, action, target, fun)
+  defp guarded_runner_action(registry_path, actor, action, target, fun, audit_action)
        when is_function(fun, 0) do
     repository = global_repository()
 
@@ -1256,7 +1412,7 @@ defmodule SymphoniaService.HTTPServer do
 
           AuditLog.record(registry_path, repository, %{
             "actor" => actor,
-            "action" => action,
+            "action" => audit_action || action,
             "target" => event_target,
             "result" => result,
             "metadata" => metadata
@@ -1289,7 +1445,16 @@ defmodule SymphoniaService.HTTPServer do
     end
   end
 
-  defp guarded(registry_path, actor, repository, permission, target, fun, metadata \\ %{})
+  defp guarded(
+         registry_path,
+         actor,
+         repository,
+         permission,
+         target,
+         fun,
+         metadata \\ %{},
+         audit_action \\ nil
+       )
        when is_function(fun, 0) do
     case Policy.authorize(actor, permission, repository, target) do
       :ok ->
@@ -1298,7 +1463,7 @@ defmodule SymphoniaService.HTTPServer do
 
           AuditLog.record(registry_path, repository, %{
             "actor" => actor,
-            "action" => permission,
+            "action" => audit_action || permission,
             "target" => target,
             "result" => "completed",
             "metadata" => metadata
@@ -1393,8 +1558,59 @@ defmodule SymphoniaService.HTTPServer do
     %{
       "runnerId" => runner["id"],
       "runnerMode" => runner["mode"],
+      "trustState" => runner["trustState"],
+      "healthState" => runner["healthState"] || runner["status"],
+      "tokenState" => runner["tokenState"],
       "capabilitySummary" => Capabilities.summary(runner["capabilities"])
     }
+    |> reject_nil()
+  end
+
+  defp secret_reference_metadata(attrs) when is_map(attrs) do
+    %{
+      "secretScope" => attrs["scope"],
+      "secretSource" => attrs["source"] || "environment"
+    }
+    |> reject_nil()
+  end
+
+  defp secret_reference_metadata(_attrs), do: %{}
+
+  defp runner_lifecycle_error(:local_service_immutable, runner_id) do
+    {400,
+     %{
+       "error" => "Local service runner cannot be changed in V1.",
+       "reasonCode" => "local_service_immutable"
+     }, runner_target(runner_id), %{"runnerId" => runner_id, "runnerMode" => "local_service"}}
+  end
+
+  defp runner_lifecycle_error(:not_found, runner_id) do
+    {404, %{"error" => "Runner not found.", "reasonCode" => "runner_not_found"},
+     runner_target(runner_id), %{"runnerId" => runner_id, "runnerMode" => "remote_runner"}}
+  end
+
+  defp runner_lifecycle_error(reason, runner_id) do
+    {409, %{"error" => runner_lifecycle_message(reason), "reasonCode" => to_string(reason)},
+     runner_target(runner_id), %{"runnerId" => runner_id, "runnerMode" => "remote_runner"}}
+  end
+
+  defp runner_lifecycle_message(:runner_disabled), do: "Runner is disabled."
+  defp runner_lifecycle_message(:runner_revoked), do: "Runner is revoked."
+  defp runner_lifecycle_message(:invalid_trust_state), do: "Runner trust state cannot be changed."
+  defp runner_lifecycle_message(_reason), do: "Runner lifecycle action failed."
+
+  defp pairing_error_message(:pairing_token_expired), do: "Pairing token has expired."
+  defp pairing_error_message(:pairing_token_used), do: "Pairing token has already been used."
+  defp pairing_error_message(:pairing_token_revoked), do: "Pairing token was revoked."
+  defp pairing_error_message(_reason), do: "Pairing token is invalid."
+
+  defp cancel_assignments_for_runner(registry_path, runner_id) do
+    registry_path
+    |> AssignmentStore.list()
+    |> Enum.filter(&(&1["runner_id"] == runner_id and not AssignmentStore.terminal?(&1)))
+    |> Enum.each(fn assignment ->
+      Assignments.cancel_assignment(registry_path, assignment)
+    end)
   end
 
   defp permission_for_task_event("approve"), do: "review.approve"
@@ -1427,6 +1643,17 @@ defmodule SymphoniaService.HTTPServer do
 
   defp runner_assignment_error(:invalid_token),
     do: {403, %{"error" => "Invalid runner token.", "reasonCode" => "invalid_runner_token"}}
+
+  defp runner_assignment_error(:runner_revoked),
+    do: {403, %{"error" => "Runner is revoked.", "reasonCode" => "runner_revoked"}}
+
+  defp runner_assignment_error(:runner_token_rotated),
+    do:
+      {403,
+       %{"error" => "Runner token has been rotated.", "reasonCode" => "runner_token_rotated"}}
+
+  defp runner_assignment_error(:runner_token_revoked),
+    do: {403, %{"error" => "Runner token is revoked.", "reasonCode" => "runner_token_revoked"}}
 
   defp runner_assignment_error(:not_found),
     do: {404, %{"error" => "Assignment or runner not found.", "reasonCode" => "not_found"}}
@@ -1600,7 +1827,11 @@ defmodule SymphoniaService.HTTPServer do
       "automation" => Automation.status(repository),
       "remoteExecutionAllowed" => RepositoryPolicy.remote_execution_allowed?(repository),
       "sandboxExecutionAllowed" => SandboxPolicy.allowed?(repository),
-      "sandboxProvider" => SandboxPolicy.provider(repository)
+      "sandboxProvider" => SandboxPolicy.provider(repository),
+      "allowedRunnerIds" => RepositoryPolicy.allowed_runner_ids(repository),
+      "allowedSandboxProviders" => RepositoryPolicy.allowed_sandbox_providers(repository),
+      "requireTrustedRunner" => true,
+      "secretScopesAllowed" => RepositoryPolicy.secret_scopes_allowed(repository)
     })
   end
 

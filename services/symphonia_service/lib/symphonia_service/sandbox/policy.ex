@@ -8,6 +8,7 @@ defmodule SymphoniaService.Sandbox.Policy do
   alias SymphoniaService.Access.{Actor, Policy}
   alias SymphoniaService.Harness.Daemon
   alias SymphoniaService.RepositoryRegistry
+  alias SymphoniaService.Runners.RepositoryPolicy
   alias SymphoniaService.Sandbox.Registry
 
   @execution_mode "cloud_sandbox"
@@ -61,6 +62,7 @@ defmodule SymphoniaService.Sandbox.Policy do
          :ok <- require_permissions(actor, repository),
          :ok <- require_repository_policy(repository),
          :ok <- require_provider(repository),
+         :ok <- require_provider_allowed(repository),
          :ok <- require_task_eligible(task),
          :ok <- require_harness_not_paused(registry_path) do
       :ok
@@ -124,7 +126,22 @@ defmodule SymphoniaService.Sandbox.Policy do
           %{
             "error" => "Sandbox provider is not configured.",
             "reasonCode" => to_string(reason)
-          }}}
+         }}}
+    end
+  end
+
+  defp require_provider_allowed(repository) do
+    provider = Registry.provider_id(repository)
+
+    if RepositoryPolicy.sandbox_provider_allowed?(repository, provider) do
+      :ok
+    else
+      {:error,
+       {403,
+        %{
+          "error" => "Sandbox provider is not allowed for this repository.",
+          "reasonCode" => "sandbox_provider_not_allowed"
+        }}}
     end
   end
 

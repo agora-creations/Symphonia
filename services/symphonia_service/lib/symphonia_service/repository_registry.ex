@@ -397,6 +397,16 @@ defmodule SymphoniaService.RepositoryRegistry do
     |> maybe_put_boolean("remoteExecutionAllowed", remote_execution_allowed?(repository))
     |> maybe_put_boolean("sandboxExecutionAllowed", sandbox_execution_allowed?(repository))
     |> maybe_put_string("sandboxProvider", sandbox_provider(repository))
+    |> maybe_put_list("allowedRunnerIds", repository["allowedRunnerIds"] || repository["allowed_runner_ids"])
+    |> maybe_put_list(
+      "allowedSandboxProviders",
+      repository["allowedSandboxProviders"] || repository["allowed_sandbox_providers"]
+    )
+    |> maybe_put_list(
+      "secretScopesAllowed",
+      repository["secretScopesAllowed"] || repository["secret_scopes_allowed"]
+    )
+    |> Map.put("requireTrustedRunner", true)
   end
 
   defp maybe_put_map(map, key, value) when is_map(value), do: Map.put(map, key, value)
@@ -405,6 +415,8 @@ defmodule SymphoniaService.RepositoryRegistry do
   defp maybe_put_boolean(map, _key, _value), do: map
   defp maybe_put_string(map, key, value) when is_binary(value) and value != "", do: Map.put(map, key, value)
   defp maybe_put_string(map, _key, _value), do: map
+  defp maybe_put_list(map, key, value) when is_list(value), do: Map.put(map, key, Enum.filter(value, &is_binary/1))
+  defp maybe_put_list(map, key, _value), do: Map.put_new(map, key, [])
 
   defp remote_execution_allowed?(repository) do
     repository["remoteExecutionAllowed"] == true or repository["remote_execution_allowed"] == true

@@ -35,10 +35,9 @@ defmodule SymphoniaService.RunnersRegistryTest do
     assert local["mode"] == "local_service"
     assert local["status"] == "online"
 
-    {:ok, runner} =
-      Registry.register(registry_path, owner, %{
+    {runner, runner_token} =
+      FakeRunner.register!(registry_path, owner, %{
         "name" => "runner-mac-mini",
-        "registrationToken" => "local-dev-token",
         "capabilities" => %{
           "codexAppServer" => true,
           "localGitWorktree" => false,
@@ -52,6 +51,7 @@ defmodule SymphoniaService.RunnersRegistryTest do
     public = Registry.public(runner)
 
     assert public["mode"] == "remote_runner"
+    assert public["trustState"] == "trusted"
 
     assert public["capabilities"] == %{
              "codexAppServer" => true,
@@ -61,7 +61,7 @@ defmodule SymphoniaService.RunnersRegistryTest do
            }
 
     encoded_public = JSON.encode!(public)
-    refute encoded_public =~ "token"
+    refute encoded_public =~ runner_token
     refute encoded_public =~ "local-dev-token"
     refute encoded_public =~ "/Users/example"
 
@@ -74,13 +74,13 @@ defmodule SymphoniaService.RunnersRegistryTest do
     registry_path: registry_path,
     owner: owner
   } do
-    {:ok, runner} = Registry.register(registry_path, owner, FakeRunner.registration_attrs())
+    {runner, runner_token} = FakeRunner.register!(registry_path, owner)
 
     assert Registry.heartbeat(registry_path, runner["id"], "bad-token", %{}) ==
              {:error, :invalid_token}
 
     {:ok, updated, _transition} =
-      Registry.heartbeat(registry_path, runner["id"], "fake-runner-token", %{
+      Registry.heartbeat(registry_path, runner["id"], runner_token, %{
         "currentRuns" => 0,
         "capabilities" => FakeRunner.capabilities()
       })
@@ -123,19 +123,21 @@ defmodule SymphoniaService.RunnersRegistryTest do
     {:ok, local} = SelectionPolicy.select_for_run(registry_path, repository, owner)
     assert local["id"] == "local-service"
 
-    {:ok, runner} =
-      Registry.register(
+    {runner, _runner_token} =
+      FakeRunner.register!(
         registry_path,
         owner,
-        FakeRunner.registration_attrs(%{
+        %{
           "capabilities" => %{
             "codexAppServer" => true,
             "localGitWorktree" => true,
             "experimentalSandbox" => true,
             "validation" => true
           }
-        })
+        }
       )
+
+    repository = Map.put(repository, "allowedRunnerIds", [runner["id"]])
 
     assert {:error, {403, %{"reasonCode" => "remote_execution_disabled"}}} =
              SelectionPolicy.select_for_run(registry_path, repository, maintainer,
@@ -173,8 +175,8 @@ defmodule SymphoniaService.RunnersRegistryTest do
       |> AuditLog.list(repository, limit: :all)
       |> Enum.map(& &1["action"])
 
-    assert "runner.selected_for_run" in actions
-    assert "runner.rejected_for_run" in actions
+    assert "runner.selection_allowed" in actions
+    assert "runner.selection_denied" in actions
   end
 
   test "fake runner exposes a future patch-bundle fixture" do

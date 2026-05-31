@@ -29,9 +29,17 @@ defmodule SymphoniaService.Access.Permission do
     "workspace_provider.experimental_run",
     "runner.view",
     "runner.register",
+    "runner.pair",
+    "runner.approve",
     "runner.enable",
     "runner.disable",
-    "runner.use_remote"
+    "runner.revoke",
+    "runner.rotate_token",
+    "runner.use_remote",
+    "secret_reference.view",
+    "secret_reference.create",
+    "secret_reference.delete",
+    "secret_scope.configure"
   ]
 
   @role_permissions %{
@@ -43,8 +51,15 @@ defmodule SymphoniaService.Access.Permission do
             "workspace_provider.experimental_run",
             "sandbox.configure",
             "runner.register",
+            "runner.pair",
+            "runner.approve",
             "runner.enable",
-            "runner.disable"
+            "runner.disable",
+            "runner.revoke",
+            "runner.rotate_token",
+            "secret_reference.create",
+            "secret_reference.delete",
+            "secret_scope.configure"
           ]
       ),
     "reviewer" =>
@@ -53,7 +68,8 @@ defmodule SymphoniaService.Access.Permission do
         "review.approve",
         "review.request_changes",
         "pull_request.refresh",
-        "runner.view"
+        "runner.view",
+        "secret_reference.view"
       ]),
     "operator" =>
       MapSet.new([
@@ -67,7 +83,7 @@ defmodule SymphoniaService.Access.Permission do
         "pull_request.refresh",
         "runner.view"
       ]),
-    "viewer" => MapSet.new(["repository.view", "runner.view"])
+    "viewer" => MapSet.new(["repository.view", "runner.view", "secret_reference.view"])
   }
 
   @labels %{
@@ -96,9 +112,17 @@ defmodule SymphoniaService.Access.Permission do
     "workspace_provider.experimental_run" => "run experimental sandbox workspaces",
     "runner.view" => "view runners",
     "runner.register" => "register runners",
+    "runner.pair" => "pair runners",
+    "runner.approve" => "approve runners",
     "runner.enable" => "enable runners",
     "runner.disable" => "disable runners",
-    "runner.use_remote" => "use remote runners"
+    "runner.revoke" => "revoke runners",
+    "runner.rotate_token" => "rotate runner tokens",
+    "runner.use_remote" => "use remote runners",
+    "secret_reference.view" => "view secret references",
+    "secret_reference.create" => "create secret references",
+    "secret_reference.delete" => "delete secret references",
+    "secret_scope.configure" => "configure secret scopes"
   }
 
   @denials %{
@@ -126,9 +150,20 @@ defmodule SymphoniaService.Access.Permission do
     "sandbox.run" =>
       "You do not have permission to run sandbox execution for this repository.",
     "runner.register" => "You do not have permission to register runners for this repository.",
+    "runner.pair" => "You do not have permission to pair runners for this repository.",
+    "runner.approve" => "You do not have permission to approve runners for this repository.",
     "runner.enable" => "You do not have permission to enable runners for this repository.",
     "runner.disable" => "You do not have permission to disable runners for this repository.",
-    "runner.use_remote" => "You do not have permission to use remote runners for this repository."
+    "runner.revoke" => "You do not have permission to revoke runners for this repository.",
+    "runner.rotate_token" =>
+      "You do not have permission to rotate runner tokens for this repository.",
+    "runner.use_remote" => "You do not have permission to use remote runners for this repository.",
+    "secret_reference.create" =>
+      "You do not have permission to create secret references for this repository.",
+    "secret_reference.delete" =>
+      "You do not have permission to delete secret references for this repository.",
+    "secret_scope.configure" =>
+      "You do not have permission to configure secret scopes for this repository."
   }
 
   def all, do: @permissions

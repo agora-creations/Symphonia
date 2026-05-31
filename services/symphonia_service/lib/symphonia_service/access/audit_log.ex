@@ -3,6 +3,8 @@ defmodule SymphoniaService.Access.AuditLog do
   Public-safe append-only audit log for repository activity.
   """
 
+  alias SymphoniaService.Secrets.Redactor
+
   @metadata_allowlist ~w(
     runId
     taskKey
@@ -15,10 +17,15 @@ defmodule SymphoniaService.Access.AuditLog do
     changedFileCount
     runnerId
     runnerMode
+    trustState
+    tokenState
+    healthState
     capabilitySummary
+    secretScope
+    secretSource
   )
 
-  @target_types ~w(repository task run review pull_request harness workflow runner)
+  @target_types ~w(repository task run review pull_request harness workflow runner secret_reference)
 
   def path(registry_path) do
     Path.join([Path.dirname(registry_path), "audit", "events.jsonl"])
@@ -68,7 +75,7 @@ defmodule SymphoniaService.Access.AuditLog do
       key = to_string(key)
 
       if key in @metadata_allowlist do
-        case sanitize_value(value) do
+        case Redactor.sanitize_value(value) do
           :drop -> []
           value -> [{key, value}]
         end
@@ -187,14 +194,6 @@ defmodule SymphoniaService.Access.AuditLog do
     |> String.slice(0, 240)
     |> redact_string()
   end
-
-  defp sanitize_value(nil), do: nil
-  defp sanitize_value(value) when is_boolean(value) or is_number(value), do: value
-
-  defp sanitize_value(value) when is_binary(value),
-    do: value |> String.slice(0, 300) |> redact_string()
-
-  defp sanitize_value(_value), do: :drop
 
   defp redact_string(value) do
     value

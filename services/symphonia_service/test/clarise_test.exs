@@ -1,5 +1,5 @@
 defmodule SymphoniaService.ClariseTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case
 
   alias SymphoniaService.Clarise.{
     ArtifactExtractor,

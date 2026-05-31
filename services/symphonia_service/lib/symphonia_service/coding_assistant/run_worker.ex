@@ -184,8 +184,10 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
 
   defp handle_provider_error(state, run, reason) do
     public_message = failure_explanation_for_state(state, reason)
+    paused_reason = paused_reason_for(public_message)
+    pause_task_for_failure(state, public_message, paused_reason)
     failed_run = mark_provider_failed(state, run, reason, public_message)
-    task = fail_task(state, failed_run, public_message)
+    task = fail_task(state, failed_run, public_message, paused_reason)
     {:done, failed_run, task}
   end
 
@@ -236,6 +238,13 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
 
       audit_run_outcome(state, run, action)
     end)
+  end
+
+  defp pause_task_for_failure(state, public_message, paused_reason) do
+    TaskStore.apply_event(state["repository"], state["task_key"], "fail_run", %{
+      "explanation" => public_message,
+      "paused_reason" => paused_reason
+    })
   end
 
   defp audit_run_outcome(state, run, action) do
